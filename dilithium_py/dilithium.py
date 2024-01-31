@@ -511,7 +511,7 @@ class Dilithium:
             # Added by Yiwei
             # y = self._expandMask(y_rho_prime, kappa)
             
-            # Removed by Yiwei
+            
             y = self._expandMask(rho_prime, kappa)
             
             y_hat = y.copy_to_ntt()
