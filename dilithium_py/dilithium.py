@@ -531,8 +531,6 @@ class Dilithium:
             # print("y = {}".format(y))
 
             if precomputed:
-                # if (w0, w1, w1_bytes, y) not in self.pre_params:
-                #     self.pre_params.append((w0, w1, w1_bytes, y))
                 if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]:
                     self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
                 
@@ -567,8 +565,7 @@ class Dilithium:
             
             if precomputed:
                 self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
-            # if precomputed:
-            #     self.pre_params.remove((w0, w1, w1_bytes, y))
+
             return self._pack_sig(c_tilde, z, h), test_i, y
 
                 
