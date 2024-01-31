@@ -91,8 +91,6 @@ class Dilithium:
         self.random_bytes = os.urandom
 
         self.sk_params = {}
-        # self.pre_params = []
-        # self.used_params = {}
     
     """
     The following two methods allow us to use deterministic
@@ -461,8 +459,6 @@ class Dilithium:
         alpha = self.gamma_2 << 1 # no change
         test_i = 0
         
-        # if sk_bytes not in self.used_params:
-        #     self.used_params[sk_bytes] = []
         
         if precomputed:
             if sk_bytes in self.sk_params:
@@ -495,7 +491,7 @@ class Dilithium:
                         continue
                     
                     self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
-                    # self.pre_params.remove((w0, w1, w1_bytes, y))
+                    
                     return self._pack_sig(c_tilde, z, h), 0, y
             else:
                 self.sk_params[sk_bytes] = []
@@ -508,10 +504,6 @@ class Dilithium:
             
             test_i = test_i + 1
 
-            # Added by Yiwei
-            # y = self._expandMask(y_rho_prime, kappa)
-            
-            
             y = self._expandMask(rho_prime, kappa)
             
             y_hat = y.copy_to_ntt()
