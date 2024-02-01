@@ -444,12 +444,11 @@ class Dilithium:
         # Set seeds and nonce (kappa)
         mu = self._h(tr + m, 64) 
         kappa = 0
-        rho_prime = self._h(K + mu, 64)
+        # rho_prime = self._h(K + mu, 64)  # Removed by Yiwei
         
         # Added by Yiwei
-        # rho_prime = K + mu
-        # y_mu = self._h(tr, 64)
-        # y_rho_prime = self._h(K + y_mu, 64)
+        y_mu = self._h(tr, 64)
+        y_rho_prime = self._h(K + y_mu, 64)
         
         # Precompute NTT representation
         # NTT: The input is in standard order, the output is in bit-reversed order.
@@ -462,7 +461,7 @@ class Dilithium:
         
         
         if precomputed:
-            start_time = time.time()
+            # start_time = time.time()
             if sk_bytes in self.sk_params:
             # if len(self.pre_params) > 0:
                 # print("Check Precompute")
@@ -476,36 +475,36 @@ class Dilithium:
                     c.to_ntt()
                     z = y + s1.scale(c).from_ntt()
                     if z.check_norm_bound(self.gamma_1 - self.beta): # z ≥ γ1 − β
-                        print("not satisfy 1")
+                        # print("not satisfy 1")
                         continue
                     
                     w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
                     if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta): # LowBits(Ay − cs2, 2γ2) ≥ γ2 − β,
-                        print("not satisfy 2")
+                        # print("not satisfy 2")
                         continue
                     
                     c_t0 = t0.scale(c).from_ntt()
                     # c_t0.reduce_coefficents()
                     if c_t0.check_norm_bound(self.gamma_2):
-                        print("not satisfy 3")
+                        # print("not satisfy 3")
                         continue
                     
                     w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
                     h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
                     if self._sum_hint(h) > self.omega:
-                        print("not satisfy 4")
+                        # print("not satisfy 4")
                         continue
                     
                     self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
-                    print("Pre-computed!")
+                    # print("Pre-computed!")
                     return self._pack_sig(c_tilde, z, h), 0, y
             
             else:
                 self.sk_params[sk_bytes] = []
             
-            end_time = time.time()
-            print("Time for iterating the pre-computed parameters: {}".format(round(end_time - start_time, 4)))
-            print("Number of saved pre-computed parameter: {}".format(len(self.sk_params[sk_bytes])))
+            # end_time = time.time()
+            # print("Time for iterating the pre-computed parameters: {}".format(round(end_time - start_time, 4)))
+            # print("Number of saved pre-computed parameter: {}".format(len(self.sk_params[sk_bytes])))
 
         # kappa = 0
         while True:
@@ -515,7 +514,10 @@ class Dilithium:
             
             test_i = test_i + 1
 
-            y = self._expandMask(rho_prime, kappa)
+            # y = self._expandMask(rho_prime, kappa) # Removed by Yiwei
+            
+            # Added by Yiwei
+            y = self._expandMask(y_rho_prime, kappa)
             
             y_hat = y.copy_to_ntt()
             

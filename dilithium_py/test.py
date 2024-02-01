@@ -7,6 +7,9 @@ original_cwd = os.getcwd()
 os.chdir(parent_dir+"/dilithium_py")
 from dilithium_py.dilithium import Dilithium2
 import time
+import string
+import random
+ 
 
 
 
@@ -21,10 +24,13 @@ def normal_test():
     w_list = []
     sig_list = []
     pk, sk = Dilithium2.keygen()
-    for i in range(20):
+    for i in range(50):
         # pk, sk = Dilithium2.keygen()
         # msg = b"Your message signed by Dilithium" * 1000
-        msg = bytes("Your message signed by Dilithium {}".format(i).encode('UTF-8'))
+        # msg = bytes("Your {} message signed by Dilithium {}".format(i, i).encode('UTF-8'))*10
+        res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
+        # print(res)
+        msg = bytes(res.encode('UTF-8')) * 10
         start_time = time.time()
         sig, loop_i, y = Dilithium2.sign(sk, msg)
         end_time = time.time()
@@ -76,9 +82,11 @@ def precomputed_test():
     w_list = []
     sig_list = []
     pk, sk = Dilithium2.keygen()
-    for i in range(20):
+    for i in range(50):
         # msg = b"Your message signed by Dilithium" * 1000
-        msg = bytes("Your message signed by Dilithium {}{}{}{}".format(i, i, i, i).encode('UTF-8'))
+        # msg = bytes("Your message signed by Dilithium {}".format(i).encode('UTF-8'))*10
+        res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
+        msg = bytes(res.encode('UTF-8')) * 10
         start_time = time.time()
         sig, loop_i, y = Dilithium2.sign(sk, msg, precomputed=True)
         end_time = time.time()
@@ -114,8 +122,8 @@ def precomputed_test():
         if ver != True:
             print("Signature Verify Failed")
         # print("+++++++++++++++++++++++++++++++++\n")
-        print("------------------------------------\n")
-        print()
+        # print("------------------------------------\n")
+        # print()
     print("\n+++++++++++++++++++++++++++++++++")
     print("Summary:")
     print("Loops: {}".format(len(loop_list)))
@@ -133,4 +141,72 @@ def precomputed_test():
     #     print("!!!!!! Use Same Params")
 
 # normal_test()
-precomputed_test()
+# precomputed_test()
+
+def both_test():
+    time_list = []
+    loop_list = []
+    y_list = []
+    w_list = []
+    sig_list = []
+    pk, sk = Dilithium2.keygen()
+    
+    print("================== Normal Dilithium Test ==================")
+    for i in range(50):
+        res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
+        msg = bytes(res.encode('UTF-8')) * 10
+        start_time = time.time()
+        sig, loop_i, y = Dilithium2.sign(sk, msg)
+        end_time = time.time()
+        time_list.append(round(end_time - start_time, 4))
+        loop_list.append(loop_i)
+        
+        
+        ver = Dilithium2.verify(pk, msg, sig)
+        # print("{}th test: Find the signature at {}th while loop with {} s.".format(i+1, loop_i, round(end_time - start_time, 4)))
+        if ver != True:
+            print("Signature Verify Failed")
+        # print("+++++++++++++++++++++++++++++++++\n")
+    print("\n+++++++++++++++++++++++++++++++++")
+    print("Summary:")
+    print("Loops: {}".format(len(loop_list)))
+    print(loop_list)
+    print("Time: {}".format(len(time_list)))
+    print(time_list)
+    print("Average Loops: {}".format(sum(loop_list)/len(loop_list)))
+    print("Average Time: {}".format(sum(time_list)/len(time_list)))
+    avg_normal = sum(time_list)/len(time_list)
+    
+    
+    print("================== Precomputed Dilithium Test ==================")
+    time_list = []
+    loop_list = []
+    for i in range(50):
+        res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
+        msg = bytes(res.encode('UTF-8')) * 10
+        start_time = time.time()
+        sig, loop_i, y = Dilithium2.sign(sk, msg, precomputed=True)
+        end_time = time.time()
+        time_list.append(round(end_time - start_time, 4))
+        loop_list.append(loop_i)
+        
+        
+        ver = Dilithium2.verify(pk, msg, sig)
+        # print("verify result = {}".format(ver))
+        # print("{}th test: Find the signature at {}th while loop with {} s (Total time).".format(i+1, loop_i, round(end_time - start_time, 4)))
+        if ver != True:
+            print("Signature Verify Failed")
+    print("\n+++++++++++++++++++++++++++++++++")
+    print("Summary:")
+    print("Loops: {}".format(len(loop_list)))
+    print(loop_list)
+    print("Time: {}".format(len(time_list)))
+    print(time_list)
+    print("Average Loops: {}".format(sum(loop_list)/len(loop_list)))
+    print("Average Time: {}".format(sum(time_list)/len(time_list)))
+    avg_pre = sum(time_list)/len(time_list)
+    
+    print("Faster: {}".format(round(avg_normal - avg_pre, 5)))
+
+
+both_test()
