@@ -152,7 +152,8 @@ def both_test():
     pk, sk = Dilithium2.keygen()
     
     print("================== Normal Dilithium Test ==================")
-    for i in range(50):
+    for i in range(20):
+        # msg = b"Your message signed by Dilithium" * 1000
         res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
         msg = bytes(res.encode('UTF-8')) * 10
         start_time = time.time()
@@ -181,7 +182,10 @@ def both_test():
     print("================== Precomputed Dilithium Test ==================")
     time_list = []
     loop_list = []
-    for i in range(50):
+    Dilithium2.pre_computed(sk, 100)
+    for i in range(20):
+        # print(len(Dilithium2.sk_params[sk]))
+        # msg = b"Your message signed by Dilithium" * 1000
         res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
         msg = bytes(res.encode('UTF-8')) * 10
         start_time = time.time()
@@ -190,6 +194,10 @@ def both_test():
         time_list.append(round(end_time - start_time, 4))
         loop_list.append(loop_i)
         
+        # if y not in y_list:
+        #     y_list.append(y)
+        # else:
+        #     print("Same Y")
         
         ver = Dilithium2.verify(pk, msg, sig)
         # print("verify result = {}".format(ver))

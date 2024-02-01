@@ -92,6 +92,7 @@ class Dilithium:
         self.random_bytes = os.urandom
 
         self.sk_params = {}
+        # self.global_kappa = 0
     
     """
     The following two methods allow us to use deterministic
@@ -434,6 +435,51 @@ class Dilithium:
         sk = self._pack_sk(rho, K, tr, s1, s2, t0)
         return pk, sk
 
+    # Added by Yiwei
+    # Pre compute before calculating the signature
+    def pre_computed(self, sk_bytes, N):
+        if sk_bytes not in self.sk_params:
+            self.sk_params[sk_bytes] = []
+            rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+            A = self._expandA(rho, is_ntt=True)
+            y_mu = self._h(tr, 64)
+            y_rho_prime = self._h(K + y_mu, 64)
+            alpha = self.gamma_2 << 1
+            kappa = 0
+            for i in range(N):
+                y = self._expandMask(y_rho_prime, kappa)
+                y_hat = y.copy_to_ntt()
+                kappa += self.l
+                # self.global_kappa = kappa
+                w  = (A @ y_hat).from_ntt()
+                w1, w0 = w.decompose(alpha)
+                w1_bytes = w1.bit_pack_w(self.gamma_2)
+                if (w0, w1, w1_bytes, y, kappa) not in self.sk_params[sk_bytes]:
+                    self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
+                else:
+                    i = i - 1
+        else:
+            if len(self.sk_params[sk_bytes]) < N:
+                rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+                A = self._expandA(rho, is_ntt=True)
+                y_mu = self._h(tr, 64)
+                y_rho_prime = self._h(K + y_mu, 64)
+                alpha = self.gamma_2 << 1
+                w0, w1, w1_bytes, y, kappa = self.sk_params[sk_bytes][len(self.sk_params[sk_bytes]) - 1]
+                for i in range(N - len(self.sk_params[sk_bytes])):
+                    y = self._expandMask(y_rho_prime, kappa)
+                    y_hat = y.copy_to_ntt()
+                    kappa += self.l
+                    w  = (A @ y_hat).from_ntt()
+                    w1, w0 = w.decompose(alpha)
+                    w1_bytes = w1.bit_pack_w(self.gamma_2)
+                    if (w0, w1, w1_bytes, y, kappa) not in self.sk_params[sk_bytes]:
+                        self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
+                    else:
+                        i = i - 1
+            
+            
+    # Modified by Yiwei
     def sign(self, sk_bytes, m, precomputed=False):
         # unpack the secret key
         rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
@@ -462,14 +508,12 @@ class Dilithium:
         
         if precomputed:
             # start_time = time.time()
+            # self.pre_computed(sk_bytes)
             if sk_bytes in self.sk_params:
-            # if len(self.pre_params) > 0:
                 # print("Check Precompute")
                 precomputed_params = self.sk_params[sk_bytes] # w0, w1, w1_bytes, y, kappa
-                # precomputed_params = self.pre_params
                 for w0, w1, w1_bytes, y, kappa in precomputed_params:
                     # print("checking precomputed params")
-                # for w0, w1, w1_bytes, y in precomputed_params:
                     c_tilde = self._h(mu + w1_bytes, 32)
                     c = self._sample_in_ball(c_tilde)
                     c.to_ntt()
@@ -507,10 +551,11 @@ class Dilithium:
             # print("Number of saved pre-computed parameter: {}".format(len(self.sk_params[sk_bytes])))
 
         # kappa = 0
+        
+        # kappa = self.global_kappa
         while True:
-            # print("{} while loop.".format(test_i))
-            # print("kappa = {}.".format(kappa))
-            # print(len(self.used_params[sk_bytes]))
+            
+            # print("kappa = {}".format(kappa))
             
             test_i = test_i + 1
 
@@ -570,6 +615,7 @@ class Dilithium:
             
             if precomputed:
                 self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
+                # self.global_kappa = kappa
 
             return self._pack_sig(c_tilde, z, h), test_i, y
 
