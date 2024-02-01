@@ -1,4 +1,5 @@
 import os
+import time
 
 from dilithium_py.polynomials import *
 from dilithium_py.modules import *
@@ -461,6 +462,7 @@ class Dilithium:
         
         
         if precomputed:
+            start_time = time.time()
             if sk_bytes in self.sk_params:
             # if len(self.pre_params) > 0:
                 # print("Check Precompute")
@@ -474,27 +476,36 @@ class Dilithium:
                     c.to_ntt()
                     z = y + s1.scale(c).from_ntt()
                     if z.check_norm_bound(self.gamma_1 - self.beta): # z ≥ γ1 − β
+                        print("not satisfy 1")
                         continue
                     
                     w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
                     if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta): # LowBits(Ay − cs2, 2γ2) ≥ γ2 − β,
+                        print("not satisfy 2")
                         continue
                     
                     c_t0 = t0.scale(c).from_ntt()
                     # c_t0.reduce_coefficents()
                     if c_t0.check_norm_bound(self.gamma_2):
+                        print("not satisfy 3")
                         continue
                     
                     w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
                     h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
                     if self._sum_hint(h) > self.omega:
+                        print("not satisfy 4")
                         continue
                     
                     self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
-                    
+                    print("Pre-computed!")
                     return self._pack_sig(c_tilde, z, h), 0, y
+            
             else:
                 self.sk_params[sk_bytes] = []
+            
+            end_time = time.time()
+            print("Time for iterating the pre-computed parameters: {}".format(round(end_time - start_time, 4)))
+            print("Number of saved pre-computed parameter: {}".format(len(self.sk_params[sk_bytes])))
 
         # kappa = 0
         while True:
@@ -523,7 +534,7 @@ class Dilithium:
             # print("y = {}".format(y))
 
             if precomputed:
-                if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]:
+                if (w0, w1, w1_bytes, y, kappa) not in self.sk_params[sk_bytes]:
                     self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
                 
 

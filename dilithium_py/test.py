@@ -24,7 +24,7 @@ def normal_test():
     for i in range(20):
         # pk, sk = Dilithium2.keygen()
         # msg = b"Your message signed by Dilithium" * 1000
-        msg = bytes("Your message signed by Dilithium {}{}{}{}".format(i, i, i, i).encode('UTF-8'))
+        msg = bytes("Your message signed by Dilithium {}".format(i).encode('UTF-8'))
         start_time = time.time()
         sig, loop_i, y = Dilithium2.sign(sk, msg)
         end_time = time.time()
@@ -110,10 +110,12 @@ def precomputed_test():
         
         ver = Dilithium2.verify(pk, msg, sig)
         # print("verify result = {}".format(ver))
-        print("{}th test: Find the signature at {}th while loop with {} s.".format(i+1, loop_i, round(end_time - start_time, 4)))
+        print("{}th test: Find the signature at {}th while loop with {} s (Total time).".format(i+1, loop_i, round(end_time - start_time, 4)))
         if ver != True:
             print("Signature Verify Failed")
         # print("+++++++++++++++++++++++++++++++++\n")
+        print("------------------------------------\n")
+        print()
     print("\n+++++++++++++++++++++++++++++++++")
     print("Summary:")
     print("Loops: {}".format(len(loop_list)))
@@ -130,5 +132,5 @@ def precomputed_test():
     # if len(used_params) != len(set_used_params):
     #     print("!!!!!! Use Same Params")
 
-normal_test()
-# precomputed_test()
+# normal_test()
+precomputed_test()
