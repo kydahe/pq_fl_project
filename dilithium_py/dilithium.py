@@ -92,7 +92,6 @@ class Dilithium:
         self.random_bytes = os.urandom
 
         self.sk_params = {}
-        # self.global_kappa = 0
     
     """
     The following two methods allow us to use deterministic
@@ -437,166 +436,107 @@ class Dilithium:
 
     # Added by Yiwei
     # Pre compute before calculating the signature
-    def pre_computed(self, sk_bytes, N):
+    def precomputing(self, sk_bytes, N=100):
         if sk_bytes not in self.sk_params:
             self.sk_params[sk_bytes] = []
-            rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
-            A = self._expandA(rho, is_ntt=True)
-            y_mu = self._h(tr, 64)
-            y_rho_prime = self._h(K + y_mu, 64)
-            alpha = self.gamma_2 << 1
-            kappa = 0
-            for i in range(N):
-                y = self._expandMask(y_rho_prime, kappa)
-                y_hat = y.copy_to_ntt()
-                kappa += self.l
-                # self.global_kappa = kappa
-                w  = (A @ y_hat).from_ntt()
-                w1, w0 = w.decompose(alpha)
-                w1_bytes = w1.bit_pack_w(self.gamma_2)
-                if (w0, w1, w1_bytes, y, kappa) not in self.sk_params[sk_bytes]:
-                    self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
-                else:
-                    i = i - 1
-        else:
-            if len(self.sk_params[sk_bytes]) < N:
-                rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
-                A = self._expandA(rho, is_ntt=True)
-                y_mu = self._h(tr, 64)
-                y_rho_prime = self._h(K + y_mu, 64)
-                alpha = self.gamma_2 << 1
-                w0, w1, w1_bytes, y, kappa = self.sk_params[sk_bytes][len(self.sk_params[sk_bytes]) - 1]
-                for i in range(N - len(self.sk_params[sk_bytes])):
-                    y = self._expandMask(y_rho_prime, kappa)
-                    y_hat = y.copy_to_ntt()
-                    kappa += self.l
-                    w  = (A @ y_hat).from_ntt()
-                    w1, w0 = w.decompose(alpha)
-                    w1_bytes = w1.bit_pack_w(self.gamma_2)
-                    if (w0, w1, w1_bytes, y, kappa) not in self.sk_params[sk_bytes]:
-                        self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
-                    else:
-                        i = i - 1
-            
+        
+        rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+        A = self._expandA(rho, is_ntt=True)
+        u = self._h(tr, 64)
+        kappa = 0
+        rho_prime = self._h(K + u, 64)
+        alpha = self.gamma_2 << 1
+        i = 0
+        while len(self.sk_params[sk_bytes]) < N:
+            i = i+1
+            y = self._expandMask(rho_prime, kappa)
+            y_hat = y.copy_to_ntt()
+            kappa += self.l # + 4
+            w  = (A @ y_hat).from_ntt()
+            w1, w0 = w.decompose(alpha)
+            w1_bytes = w1.bit_pack_w(self.gamma_2)
+            # print(i)
+            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]:
+                self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
+        
             
     # Modified by Yiwei
-    def sign(self, sk_bytes, m, precomputed=False):
-        # unpack the secret key
+    def sign_precomputed(self, sk_bytes, m, N=7, start=0):
         rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
-        
-        # Generate matrix A ∈ R^(kxl)
-        A = self._expandA(rho, is_ntt=True)
-        
-        # Set seeds and nonce (kappa)
         mu = self._h(tr + m, 64) 
-        kappa = 0
-        # rho_prime = self._h(K + mu, 64)  # Removed by Yiwei
-        
-        # Added by Yiwei
-        y_mu = self._h(tr, 64)
-        y_rho_prime = self._h(K + y_mu, 64)
-        
-        # Precompute NTT representation
-        # NTT: The input is in standard order, the output is in bit-reversed order.
         s1.to_ntt()
         s2.to_ntt()
         t0.to_ntt()
-        
-        alpha = self.gamma_2 << 1 # no change
-        test_i = 0
-        
-        
-        if precomputed:
-            # start_time = time.time()
-            # self.pre_computed(sk_bytes)
-            if sk_bytes in self.sk_params:
-                # print("Check Precompute")
-                precomputed_params = self.sk_params[sk_bytes] # w0, w1, w1_bytes, y, kappa
-                for w0, w1, w1_bytes, y, kappa in precomputed_params:
-                    # print("checking precomputed params")
-                    c_tilde = self._h(mu + w1_bytes, 32)
-                    c = self._sample_in_ball(c_tilde)
-                    c.to_ntt()
-                    z = y + s1.scale(c).from_ntt()
-                    if z.check_norm_bound(self.gamma_1 - self.beta): # z ≥ γ1 − β
-                        # print("not satisfy 1")
-                        continue
-                    
-                    w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
-                    if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta): # LowBits(Ay − cs2, 2γ2) ≥ γ2 − β,
-                        # print("not satisfy 2")
-                        continue
-                    
-                    c_t0 = t0.scale(c).from_ntt()
-                    # c_t0.reduce_coefficents()
-                    if c_t0.check_norm_bound(self.gamma_2):
-                        # print("not satisfy 3")
-                        continue
-                    
-                    w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
-                    h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
-                    if self._sum_hint(h) > self.omega:
-                        # print("not satisfy 4")
-                        continue
-                    
-                    self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
-                    # print("Pre-computed!")
-                    return self._pack_sig(c_tilde, z, h), 0, y
+        alpha = self.gamma_2 << 1
+        if sk_bytes in self.sk_params:
+            precomputed_params = self.sk_params[sk_bytes] # w0, w1, w1_bytes, y, kappa
+            for i in range(start, start + N):
+            # for w0, w1, w1_bytes, y, kappa in precomputed_params:
+                w0, w1, w1_bytes, y, kappa = precomputed_params[i]
+                
+                w1_bytes_tilde = self._h(m + w1_bytes, 64)
+                
+                c_tilde = self._h(mu + w1_bytes_tilde, 32)
+                c = self._sample_in_ball(c_tilde)
+                c.to_ntt()
+                z = y + s1.scale(c).from_ntt()
+                if z.check_norm_bound(self.gamma_1 - self.beta):
+                    continue
+                
+                w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
+                if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta):
+                    continue
+                
+                c_t0 = t0.scale(c).from_ntt()
+                # c_t0.reduce_coefficents()
+                if c_t0.check_norm_bound(self.gamma_2):
+                    continue
+                
+                w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
+                h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
+                if self._sum_hint(h) > self.omega:
+                    continue
+                
+                self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
+                return self._pack_sig(c_tilde, z, h), 0, y
             
-            else:
-                self.sk_params[sk_bytes] = []
-            
-            # end_time = time.time()
-            # print("Time for iterating the pre-computed parameters: {}".format(round(end_time - start_time, 4)))
-            # print("Number of saved pre-computed parameter: {}".format(len(self.sk_params[sk_bytes])))
-
-        # kappa = 0
+        A = self._expandA(rho, is_ntt=True)
+        u = self._h(tr, 64)
+        pre_len = len(self.sk_params[sk_bytes])
+        if pre_len > 0:
+            _, _, _, _, kappa = self.sk_params[sk_bytes][pre_len - 1]
+        else:
+            kappa = 0
+        rho_prime = self._h(K + u, 64)
         
-        # kappa = self.global_kappa
+        i = 0
         while True:
-            
-            # print("kappa = {}".format(kappa))
-            
-            test_i = test_i + 1
-
-            # y = self._expandMask(rho_prime, kappa) # Removed by Yiwei
-            
-            # Added by Yiwei
-            y = self._expandMask(y_rho_prime, kappa)
-            
+            i = i + 1
+            y = self._expandMask(rho_prime, kappa)
             y_hat = y.copy_to_ntt()
             
-            # increment the nonce
-            kappa += self.l # + 4
+            kappa += self.l
             
             w  = (A @ y_hat).from_ntt()
-
-            # Extract out both the high and low bits
             w1, w0 = w.decompose(alpha)
             
-            # Create challenge polynomial
-            w1_bytes = w1.bit_pack_w(self.gamma_2) # w1 := HighBits(Ay, 2γ2)
-            # print("kappa = {}".format(kappa))
-            # print("rho_prime = {}".format(rho_prime))
-            # print("y = {}".format(y))
+            w1_bytes = w1.bit_pack_w(self.gamma_2) 
 
-            if precomputed:
-                if (w0, w1, w1_bytes, y, kappa) not in self.sk_params[sk_bytes]:
-                    self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
-                
-
-            c_tilde = self._h(mu + w1_bytes, 32) # := H(M || w1)
-            c = self._sample_in_ball(c_tilde)
+            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]:
+                self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
             
-            # Store c in NTT form
+            w1_bytes_tilde = self._h(m + w1_bytes, 64)
+
+            c_tilde = self._h(mu + w1_bytes_tilde, 32) 
+            c = self._sample_in_ball(c_tilde)
             c.to_ntt()
             
-            z = y + s1.scale(c).from_ntt() # z = y + c*s1
-            if z.check_norm_bound(self.gamma_1 - self.beta): # z ≥ γ1 − β
+            z = y + s1.scale(c).from_ntt() 
+            if z.check_norm_bound(self.gamma_1 - self.beta):
                 continue
 
             w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
-            if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta): # LowBits(Ay − cs2, 2γ2) ≥ γ2 − β,
+            if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta): 
                 continue
             
             c_t0 = t0.scale(c).from_ntt()
@@ -613,11 +553,71 @@ class Dilithium:
                 continue
             
             
-            if precomputed:
-                self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
-                # self.global_kappa = kappa
+            self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
+            return self._pack_sig(c_tilde, z, h), i, y
+        
+    def sign(self, sk_bytes, m):
+        # unpack the secret key
+        rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+        
+        # Generate matrix A ∈ R^(kxl)
+        A = self._expandA(rho, is_ntt=True)
+        
+        # Set seeds and nonce (kappa)
+        mu = self._h(tr + m, 64)
+        kappa = 0
+        rho_prime = self._h(K + mu, 64)
+        
+        # Precompute NTT representation
+        s1.to_ntt()
+        s2.to_ntt()
+        t0.to_ntt()
+        
+        alpha = self.gamma_2 << 1
+        i = 0
+        while True:
+            i = i+1
+            y = self._expandMask(rho_prime, kappa)
+            y_hat = y.copy_to_ntt()
+            
+            # increment the nonce
+            kappa += self.l
+            
+            w  = (A @ y_hat).from_ntt()
 
-            return self._pack_sig(c_tilde, z, h), test_i, y
+            # Extract out both the high and low bits
+            w1, w0 = w.decompose(alpha)
+            
+            # Create challenge polynomial
+            w1_bytes = w1.bit_pack_w(self.gamma_2)
+            c_tilde = self._h(mu + w1_bytes, 32)
+            c = self._sample_in_ball(c_tilde)
+            
+            # Store c in NTT form
+            c.to_ntt()
+            
+            z = y + s1.scale(c).from_ntt()
+            if z.check_norm_bound(self.gamma_1 - self.beta):
+                continue
+
+            w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
+            if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta):
+                continue
+            
+            c_t0 = t0.scale(c).from_ntt()
+            # c_t0.reduce_coefficents()
+
+            if c_t0.check_norm_bound(self.gamma_2):
+                continue
+            
+            w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
+            
+            h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
+
+            if self._sum_hint(h) > self.omega:
+                continue
+            
+            return self._pack_sig(c_tilde, z, h), i, y
 
                 
         
@@ -651,6 +651,38 @@ class Dilithium:
         w_prime_bytes = w_prime.bit_pack_w(self.gamma_2)
         
         return c_tilde == self._h(mu + w_prime_bytes, 32)
+    
+    def verify_precomputed(self, pk_bytes, m, sig_bytes):
+        rho, t1 = self._unpack_pk(pk_bytes)
+        c_tilde, z, h = self._unpack_sig(sig_bytes)
+        
+        if self._sum_hint(h) > self.omega:
+            return False
+            
+        if z.check_norm_bound(self.gamma_1 - self.beta):
+            return False
+            
+        A = self._expandA(rho, is_ntt=True)
+        
+        tr = self._h(pk_bytes, 32)
+        mu = self._h(tr + m, 64)
+        c = self._sample_in_ball(c_tilde)
+        
+        # Convert to NTT for computation
+        c.to_ntt()
+        z.to_ntt()
+        
+        t1 = t1.scale(1 << self.d)
+        t1.to_ntt()
+        
+        Az_minus_ct1 = (A @ z) - t1.scale(c)
+        Az_minus_ct1.from_ntt()
+        
+        w_prime = self._use_hint(h, Az_minus_ct1, 2*self.gamma_2)
+        w_prime_bytes = w_prime.bit_pack_w(self.gamma_2)
+        w_prime_bytes_tilde = self._h(m + w_prime_bytes, 64)
+        
+        return c_tilde == self._h(mu + w_prime_bytes_tilde, 32)
         
 Dilithium2 = Dilithium(DEFAULT_PARAMETERS["dilithium2"])
 Dilithium3 = Dilithium(DEFAULT_PARAMETERS["dilithium3"])

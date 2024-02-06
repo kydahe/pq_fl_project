@@ -24,7 +24,7 @@ def normal_test():
     w_list = []
     sig_list = []
     pk, sk = Dilithium2.keygen()
-    for i in range(50):
+    for i in range(30):
         # pk, sk = Dilithium2.keygen()
         # msg = b"Your message signed by Dilithium" * 1000
         # msg = bytes("Your {} message signed by Dilithium {}".format(i, i).encode('UTF-8'))*10
@@ -81,14 +81,16 @@ def precomputed_test():
     y_list = []
     w_list = []
     sig_list = []
+    N = 10
     pk, sk = Dilithium2.keygen()
-    for i in range(50):
+    Dilithium2.precomputing(sk, N*50)
+    for i in range(30):
         # msg = b"Your message signed by Dilithium" * 1000
         # msg = bytes("Your message signed by Dilithium {}".format(i).encode('UTF-8'))*10
         res = ''.join(random.choices(string.ascii_letters + string.digits + string.punctuation, k=32))
         msg = bytes(res.encode('UTF-8')) * 10
         start_time = time.time()
-        sig, loop_i, y = Dilithium2.sign(sk, msg, precomputed=True)
+        sig, loop_i, y = Dilithium2.sign_precomputed(sk, msg, N, N*i)
         end_time = time.time()
         time_list.append(round(end_time - start_time, 4))
         loop_list.append(loop_i)
@@ -116,7 +118,7 @@ def precomputed_test():
         # else:
         #     print("Same Sig")
         
-        ver = Dilithium2.verify(pk, msg, sig)
+        ver = Dilithium2.verify_precomputed(pk, msg, sig)
         # print("verify result = {}".format(ver))
         print("{}th test: Find the signature at {}th while loop with {} s (Total time).".format(i+1, loop_i, round(end_time - start_time, 4)))
         if ver != True:
@@ -141,7 +143,7 @@ def precomputed_test():
     #     print("!!!!!! Use Same Params")
 
 # normal_test()
-# precomputed_test()
+precomputed_test()
 
 def both_test():
     time_list = []
@@ -217,4 +219,4 @@ def both_test():
     print("Faster: {}".format(round(avg_normal - avg_pre, 5)))
 
 
-both_test()
+# both_test()
