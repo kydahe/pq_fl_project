@@ -81,7 +81,7 @@ def precomputed_test():
     y_list = []
     w_list = []
     sig_list = []
-    N = 10
+    N = 50
     pk, sk = Dilithium2.keygen()
     Dilithium2.precomputing(sk, N*50)
     for i in range(30):
@@ -142,8 +142,28 @@ def precomputed_test():
     # if len(used_params) != len(set_used_params):
     #     print("!!!!!! Use Same Params")
 
+start = time.time()
 # normal_test()
 precomputed_test()
+end = time.time()
+print("Total time: {}".format(round(end - start, 4)))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 def both_test():
     time_list = []

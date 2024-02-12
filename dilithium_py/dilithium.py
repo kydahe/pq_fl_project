@@ -438,7 +438,8 @@ class Dilithium:
     # Pre compute before calculating the signature
     def precomputing(self, sk_bytes, N=100):
         if sk_bytes not in self.sk_params:
-            self.sk_params[sk_bytes] = []
+            self.sk_params[sk_bytes] = {}
+            self.sk_params[sk_bytes]['precomputed'] = []
         
         rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
         A = self._expandA(rho, is_ntt=True)
@@ -447,7 +448,16 @@ class Dilithium:
         rho_prime = self._h(K + u, 64)
         alpha = self.gamma_2 << 1
         i = 0
-        while len(self.sk_params[sk_bytes]) < N:
+        s1.to_ntt()
+        s2.to_ntt()
+        t0.to_ntt()
+        self.sk_params[sk_bytes]['rho'] = rho
+        self.sk_params[sk_bytes]['K'] = K
+        self.sk_params[sk_bytes]['tr'] = tr
+        self.sk_params[sk_bytes]['s1'] = s1
+        self.sk_params[sk_bytes]['s2'] = s2
+        self.sk_params[sk_bytes]['t0'] = t0
+        while len(self.sk_params[sk_bytes]['precomputed']) < N:
             i = i+1
             y = self._expandMask(rho_prime, kappa)
             y_hat = y.copy_to_ntt()
@@ -456,20 +466,26 @@ class Dilithium:
             w1, w0 = w.decompose(alpha)
             w1_bytes = w1.bit_pack_w(self.gamma_2)
             # print(i)
-            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]:
-                self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
+            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]['precomputed']:
+                self.sk_params[sk_bytes]['precomputed'].append((w0, w1, w1_bytes, y, kappa))
         
             
     # Modified by Yiwei
-    def sign_precomputed(self, sk_bytes, m, N=7, start=0):
-        rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+    def sign_precomputed(self, sk_bytes, m, N=50, start=0):
+        # rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+        rho = self.sk_params[sk_bytes]['rho'] 
+        K = self.sk_params[sk_bytes]['K']
+        tr = self.sk_params[sk_bytes]['tr']
+        s1 = self.sk_params[sk_bytes]['s1']
+        s2 = self.sk_params[sk_bytes]['s2']
+        t0 = self.sk_params[sk_bytes]['t0'] 
         mu = self._h(tr + m, 64) 
-        s1.to_ntt()
-        s2.to_ntt()
-        t0.to_ntt()
+        # s1.to_ntt()
+        # s2.to_ntt()
+        # t0.to_ntt()
         alpha = self.gamma_2 << 1
         if sk_bytes in self.sk_params:
-            precomputed_params = self.sk_params[sk_bytes] # w0, w1, w1_bytes, y, kappa
+            precomputed_params = self.sk_params[sk_bytes]['precomputed'] # w0, w1, w1_bytes, y, kappa
             for i in range(start, start + N):
             # for w0, w1, w1_bytes, y, kappa in precomputed_params:
                 w0, w1, w1_bytes, y, kappa = precomputed_params[i]
@@ -497,14 +513,14 @@ class Dilithium:
                 if self._sum_hint(h) > self.omega:
                     continue
                 
-                self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
+                self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
                 return self._pack_sig(c_tilde, z, h), 0, y
             
         A = self._expandA(rho, is_ntt=True)
         u = self._h(tr, 64)
-        pre_len = len(self.sk_params[sk_bytes])
+        pre_len = len(self.sk_params[sk_bytes]['precomputed'])
         if pre_len > 0:
-            _, _, _, _, kappa = self.sk_params[sk_bytes][pre_len - 1]
+            _, _, _, _, kappa = self.sk_params[sk_bytes]['precomputed'][pre_len - 1]
         else:
             kappa = 0
         rho_prime = self._h(K + u, 64)
@@ -522,8 +538,8 @@ class Dilithium:
             
             w1_bytes = w1.bit_pack_w(self.gamma_2) 
 
-            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]:
-                self.sk_params[sk_bytes].append((w0, w1, w1_bytes, y, kappa))
+            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]['precomputed']:
+                self.sk_params[sk_bytes]['precomputed'].append((w0, w1, w1_bytes, y, kappa))
             
             w1_bytes_tilde = self._h(m + w1_bytes, 64)
 
@@ -553,7 +569,7 @@ class Dilithium:
                 continue
             
             
-            self.sk_params[sk_bytes].remove((w0, w1, w1_bytes, y, kappa))
+            self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
             return self._pack_sig(c_tilde, z, h), i, y
         
     def sign(self, sk_bytes, m):
