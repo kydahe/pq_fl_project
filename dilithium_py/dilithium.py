@@ -7,6 +7,8 @@ from dilithium_py.shake_wrapper import Shake128, Shake256
 from dilithium_py.utils import *
 from dilithium_py.ntt_helper import NTTHelperDilithium
 
+from multiprocessing import Process, Queue, cpu_count, Value, Lock
+
 try:
     from aes256_ctr_drbg import AES256_CTR_DRBG
 except ImportError as e:
@@ -434,9 +436,225 @@ class Dilithium:
         sk = self._pack_sk(rho, K, tr, s1, s2, t0)
         return pk, sk
 
-    # Added by Yiwei
+    # Added by Yiwei: precomputing with multiprocessing
     # Pre compute before calculating the signature
+    def get_one_param(self, sk_bytes, s_kappa, e_kappa, shared_queues, rho_prime, A, alpha, gamma_2):
+        kappa = s_kappa
+        results = []
+        while kappa < e_kappa:
+            y = self._expandMask(rho_prime, kappa)
+            y_hat = y.copy_to_ntt()
+            kappa += self.l # + 4
+            w  = (A @ y_hat).from_ntt()
+            w1, w0 = w.decompose(alpha)
+            w1_bytes = w1.bit_pack_w(self.gamma_2)
+            # print(i)
+            if (w0, w1, w1_bytes, y) not in results:
+                results.append((w0, w1, w1_bytes, y, kappa))
+        shared_queues.put(results)
+        
     def precomputing(self, sk_bytes, N=100):
+        if sk_bytes not in self.sk_params:
+            self.sk_params[sk_bytes] = {}
+            self.sk_params[sk_bytes]['precomputed'] = []
+        
+        rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+        A = self._expandA(rho, is_ntt=True)
+        u = self._h(tr, 64)
+        kappa = 0
+        rho_prime = self._h(K + u, 64)
+        alpha = self.gamma_2 << 1
+        i = 0
+        s1.to_ntt()
+        s2.to_ntt()
+        t0.to_ntt()
+        self.sk_params[sk_bytes]['rho'] = rho
+        self.sk_params[sk_bytes]['K'] = K
+        self.sk_params[sk_bytes]['tr'] = tr
+        self.sk_params[sk_bytes]['s1'] = s1
+        self.sk_params[sk_bytes]['s2'] = s2
+        self.sk_params[sk_bytes]['t0'] = t0
+        
+        num_processes = cpu_count()
+        shared_queues = Queue()
+        processes = []
+        kappa_range = N // num_processes
+        
+        
+        for i in range(num_processes):
+            s_kappa = i * kappa_range * self.l
+            e_kappa = (i+1) * kappa_range * self.l if i < num_processes - 1 else N * self.l
+            p = Process(target=self.get_one_param, args=(sk_bytes, s_kappa, e_kappa, shared_queues, rho_prime, A, alpha, self.gamma_2))
+            processes.append(p)
+            p.start()
+            if e_kappa == N * self.l:
+                break
+        
+        for p in processes:
+            self.sk_params[sk_bytes]['precomputed'].extend(shared_queues.get())
+        
+        for p in processes:
+            p.join()
+
+        # print(len(self.sk_params[sk_bytes]['precomputed']))
+
+    def find_sign(self, shared_queues, terminate_flag, lock, precomputed_params, m, mu, s1, s2, t0, alpha):
+        results = []
+        # print(len(precomputed_params))
+        is_found = False
+        if terminate_flag.value == 1:
+            return
+        for i in range(len(precomputed_params)):
+            w0, w1, w1_bytes, y, kappa = precomputed_params[i]
+                
+            w1_bytes_tilde = self._h(m + w1_bytes, 64)
+            
+            c_tilde = self._h(mu + w1_bytes_tilde, 32)
+            c = self._sample_in_ball(c_tilde)
+            c.to_ntt()
+            z = y + s1.scale(c).from_ntt()
+            if z.check_norm_bound(self.gamma_1 - self.beta):
+                continue
+            
+            w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
+            if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta):
+                continue
+            
+            c_t0 = t0.scale(c).from_ntt()
+            # c_t0.reduce_coefficents()
+            if c_t0.check_norm_bound(self.gamma_2):
+                continue
+            
+            w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
+            h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
+            if self._sum_hint(h) > self.omega:
+                continue
+            
+            # self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
+            
+            sig = self._pack_sig(c_tilde, z, h)
+            # print("find sign")
+            results.append((sig, w0, w1, w1_bytes, y, kappa))
+            is_found = True
+            break
+
+        shared_queues.put(results)
+        if is_found == True:
+            with lock:
+                if terminate_flag.value == 0:
+                    terminate_flag.value = 1 
+        
+
+    def sign_precomputed(self, sk_bytes, m, N=50, start=0):
+        # rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
+        rho = self.sk_params[sk_bytes]['rho'] 
+        K = self.sk_params[sk_bytes]['K']
+        tr = self.sk_params[sk_bytes]['tr']
+        s1 = self.sk_params[sk_bytes]['s1']
+        s2 = self.sk_params[sk_bytes]['s2']
+        t0 = self.sk_params[sk_bytes]['t0'] 
+        mu = self._h(tr + m, 64) 
+        # s1.to_ntt()
+        # s2.to_ntt()
+        # t0.to_ntt()
+        alpha = self.gamma_2 << 1
+        if sk_bytes in self.sk_params:
+            precomputed_params = self.sk_params[sk_bytes]['precomputed'][start: start + N] # w0, w1, w1_bytes, y, kappa
+            
+            is_calc = False
+            num_processes = cpu_count()
+            shared_queues = Queue()
+            terminate_flag = Value('i', 0)
+            lock = Lock()
+            processes = []
+            cases_per_process = N // num_processes + 1
+            for i in range(num_processes):
+                params = precomputed_params[i*cases_per_process : (i+1)*cases_per_process] if (i+1)*cases_per_process <= N else precomputed_params[i*cases_per_process : N]
+                p = Process(target=self.find_sign, args=(shared_queues, terminate_flag, lock, params, m, mu, s1, s2, t0, alpha))
+                processes.append(p)
+                p.start()
+                if (i+1)*cases_per_process >= N:
+                    break
+            
+            # for p in processes:
+            while not shared_queues.empty():
+                res = shared_queues.get()
+                if is_calc == False and len(res) > 0:
+                    # print("res > 0")
+                    (sig, w0, w1, w1_bytes, y, kappa) = res[0]
+                    is_calc = True
+                    break
+            
+            if is_calc == True:
+                for p in processes:
+                    p.terminate()
+                    # p.join()
+            
+            if is_calc:
+                # print("is_calc = true")
+                self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
+                return sig, 0, y
+            
+        A = self._expandA(rho, is_ntt=True)
+        u = self._h(tr, 64)
+        pre_len = len(self.sk_params[sk_bytes]['precomputed'])
+        if pre_len > 0:
+            _, _, _, _, kappa = self.sk_params[sk_bytes]['precomputed'][pre_len - 1]
+        else:
+            kappa = 0
+        rho_prime = self._h(K + u, 64)
+        
+        i = 0
+        while True:
+            i = i + 1
+            y = self._expandMask(rho_prime, kappa)
+            y_hat = y.copy_to_ntt()
+            
+            kappa += self.l
+            
+            w  = (A @ y_hat).from_ntt()
+            w1, w0 = w.decompose(alpha)
+            
+            w1_bytes = w1.bit_pack_w(self.gamma_2) 
+
+            if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]['precomputed']:
+                self.sk_params[sk_bytes]['precomputed'].append((w0, w1, w1_bytes, y, kappa))
+            
+            w1_bytes_tilde = self._h(m + w1_bytes, 64)
+
+            c_tilde = self._h(mu + w1_bytes_tilde, 32) 
+            c = self._sample_in_ball(c_tilde)
+            c.to_ntt()
+            
+            z = y + s1.scale(c).from_ntt() 
+            if z.check_norm_bound(self.gamma_1 - self.beta):
+                continue
+
+            w0_minus_cs2 = w0 - s2.scale(c).from_ntt()
+            if w0_minus_cs2.check_norm_bound(self.gamma_2 - self.beta): 
+                continue
+            
+            c_t0 = t0.scale(c).from_ntt()
+            # c_t0.reduce_coefficents()
+
+            if c_t0.check_norm_bound(self.gamma_2):
+                continue
+            
+            w0_minus_cs2_plus_ct0 = w0_minus_cs2 + c_t0
+            
+            h = self._make_hint(w0_minus_cs2_plus_ct0, w1, alpha)            
+
+            if self._sum_hint(h) > self.omega:
+                continue
+            
+            
+            self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
+            return self._pack_sig(c_tilde, z, h), i, y
+    
+
+    # Added by Yiwei: only precomputing version without multiprocessing
+    # Pre compute before calculating the signature
+    def precomputing_only(self, sk_bytes, N=100):
         if sk_bytes not in self.sk_params:
             self.sk_params[sk_bytes] = {}
             self.sk_params[sk_bytes]['precomputed'] = []
@@ -468,10 +686,10 @@ class Dilithium:
             # print(i)
             if (w0, w1, w1_bytes, y) not in self.sk_params[sk_bytes]['precomputed']:
                 self.sk_params[sk_bytes]['precomputed'].append((w0, w1, w1_bytes, y, kappa))
-        
+
             
-    # Modified by Yiwei
-    def sign_precomputed(self, sk_bytes, m, N=50, start=0):
+    # Modified by Yiwei: only precomputing version without multiprocessing
+    def sign_precomputed_only(self, sk_bytes, m, N=50, start=0):
         # rho, K, tr, s1, s2, t0 = self._unpack_sk(sk_bytes)
         rho = self.sk_params[sk_bytes]['rho'] 
         K = self.sk_params[sk_bytes]['K']
