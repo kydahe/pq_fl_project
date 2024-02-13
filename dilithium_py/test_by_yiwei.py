@@ -166,7 +166,7 @@ def precomputed_test_pmp():
 
 
 def precomputed_test_mp():
-    print("================== Precomputed Dilithium Test with mutiprocessing in both precomputation and signning ==================")
+    print("================== Precomputed Dilithium Test with mutiprocessing in both precomputation and signing ==================")
     # pk, sk = Dilithium2.keygen()
     # msg = b"Your message signed by Dilithium"
     # pool = Pool(processes=48)
@@ -224,7 +224,7 @@ def calc_sign(sk, shared_queues, messages, N, N_s):
     results = []
     for msg in messages:
         start_time = time.time()
-        sig, loop_i, y = Dilithium2.sign_precomputed(sk, msg, N, N_s + N*i)
+        sig, loop_i, y = Dilithium2.sign_precomputed_only(sk, msg, N, N_s + N*i)
         end_time = time.time()
         results.append((msg, sig, loop_i, round(end_time - start_time, 4)))
         i = i+1
@@ -305,8 +305,8 @@ start = time.time()
 # normal_test()
 # precomputed_test()
 # precomputed_test_pmp()
-precomputed_test_mp()
-# precomputed_test_mp_both()
+# precomputed_test_mp()
+precomputed_test_mp_both()
 end = time.time()
 print("++++++++++++++++++++++++")
 print("Total time: {}".format(round(end - start, 4)))
