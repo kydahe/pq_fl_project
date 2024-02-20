@@ -594,7 +594,7 @@ class Dilithium:
                 # print("is_calc = true")
                 self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
                 return sig, 0, y
-            
+
         A = self._expandA(rho, is_ntt=True)
         u = self._h(tr, 64)
         pre_len = len(self.sk_params[sk_bytes]['precomputed'])
@@ -733,7 +733,8 @@ class Dilithium:
                 
                 self.sk_params[sk_bytes]['precomputed'].remove((w0, w1, w1_bytes, y, kappa))
                 return self._pack_sig(c_tilde, z, h), 0, y
-            
+        
+        print("Signing out of precomputed results.")
         A = self._expandA(rho, is_ntt=True)
         u = self._h(tr, 64)
         pre_len = len(self.sk_params[sk_bytes]['precomputed'])
