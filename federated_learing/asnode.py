@@ -2,6 +2,7 @@ import zmq
 import json
 import os
 import sys
+from utils import *
 parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 sys.path.insert(0, parent_dir+"/dilithium_py")
@@ -21,296 +22,338 @@ import random
 import base64
 import numpy as np
 import ast
-
-user_info = {}
-server_info = {}
-N = 50
-USER_NUM = 2
-W_LEN = 3
+import threading
 
 
-def int_to_bytes(num):
-    return num.to_bytes(4, byteorder='big', signed=False)
+from Cryptodome.PublicKey import ECC
+from Cryptodome.Cipher import AES, ChaCha20
+from Cryptodome.Random import get_random_bytes
+from Cryptodome.Hash import SHA256
+from Cryptodome.Signature import DSS
 
+# user_info = {}
+# server_info = {}
+# N = 50
+# USER_NUM = 2
+# W_LEN = 3
 
-def bytes_to_int(b):
-    return int.from_bytes(b, byteorder='big', signed=False)
-
-
-def gen_dili_pk():
-    pk, sk = Dilithium2.keygen()
-    # print(len(sk))
-    return pk, sk
-
-def gen_kyber_pk():
-    # pk, sk = Kyber1024._cpapke_keygen()
-    pk, sk = Kyber1024.keygen()
-    # print(len(sk))
-    return pk, sk
-
-def gen_pk(opt="Dili"):
-    if opt == "Dili":
-        return gen_dili_pk()
-    else:
-        return gen_kyber_pk()
-
-def gen_r():
-    random_number = random.randint(0, 4294967295)
-    # seed_msg = bytes("Message is {}".format(random_number).encode('UTF-8'))
-    seed_msg = bytes("{}".format(random_number).encode('UTF-8'))
-    variant="Ascon-Hash"
-    hashlength = 32
-    r = ascon_hash(seed_msg, variant, hashlength)
-    # print(random_number)
-    # print(r.hex())
-    return r
-
-
-def gen_at(x_a, t, length=16):
-    t_bytes = t.to_bytes(4, byteorder='big')
-    a_t_bytes = ascon_mac(x_a[0:16], t_bytes, "Ascon-Prf", length)
-    a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
-    return a_t
-
-
-def padding(msg, target_len):
-    msg_len = len(msg)
-    padding_len = (target_len - msg_len)
-    padding = []
-    padding.extend([padding_len for _ in range(padding_len)])
-    return msg + bytes(padding)
-
-def unpadding(msg):
-    msg_len = len(msg)
-    padding_len = int(msg[-1])
-    return msg[0:msg_len - padding_len]
-
-def kyber_enc(plaintext, pk, r):
-    target_len = int(Kyber1024.n / 8)
-    msg_padding = padding(plaintext, target_len)
-    ciphertext = Kyber1024._cpapke_enc(pk, msg_padding, r)
-    return ciphertext
-
-def kyber_dec(ciphertext, sk):
-    msg = Kyber1024._cpapke_dec(sk, ciphertext)
-    # print(msg)
-    plaintext = unpadding(msg)
-    return plaintext
-
-def dili_sign(msg, sk, i=0):
-    sig, _, __ = Dilithium2.sign_precomputed_only(sk, msg, N, N*i)
-    return sig
-
-def dili_verify(msg, sig, pk):
-    ver = Dilithium2.verify_precomputed(pk, msg, sig)
-    print("verify result = {}".format(ver)) 
-    return ver
-
-def kyber_encaps(pk):
-    c, key = Kyber1024.enc(pk)
-    return c, key
-
-def kyber_decaps(sk, c):
-    key = Kyber1024.dec(c, sk)
-    return key
-
-
-def msg_pack_send(socket, operation, session_id, content, sig):
-    msg = {'type': operation, 'session_id': session_id, 'content': content, 'sig': sig}
-    socket.send_json(msg)
+class AssistingNode:
+    def __init__(self, asnode_id, host, port_setup, port_update):
+        self.user_info = {}
+        self.server_info = {}
+        self.N_SIGN = 50
+        self.USER_NUM = 10
+        self.VEC_LEN = 16000
+        self.sk_sign = b''
+        self.pk_sign = b''
+        self.sk_ex = b''
+        self.pk_ex = b''
+        self.asnode_id = asnode_id
+        self.host = host
+        self.port_setup = port_setup
+        self.port_update = port_update
+        self.socket_setup = None
+        self.socket_update = None
+        self.sign_count = 0
+        self.KE_DONE = False
+        self.iter_num = 0
     
-def msg_pack_recv(resp):
-    operation = resp.get('type')
-    session_id = resp.get('session_id')
-    content = resp.get('content')
-    sig = resp.get('sig')
-    return operation, session_id, content, sig
+    def gen_at(self, x_a, t, length=16):
+        # start_time = time.time()
+        t_bytes = t.to_bytes(4, byteorder='big')
+        a_t_bytes = ascon_mac(x_a[0:16], t_bytes, "Ascon-Prf", length)
+        a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
+        
+        
+        # nonce_bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00'
+        # chacha_algo = ChaCha20.new(key=x_a[0:32], nonce=nonce_bytes)
+        # data = t_bytes
+        # a_t_bytes = chacha_algo.encrypt(data) *4000
+        # a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
+        
+        # print("gen_at time: {}".format(time.time()-start_time))
+        return a_t
 
+    def msg_send_with_sig(self, socket, operation, content, sig):
+        msg = {'type': operation, 'session_id': self.asnode_id, 'content': content, 'sig': sig}
+        socket.send_json(msg)
 
+    def msg_recv_with_sig(self, resp):
+        operation = resp.get('type')
+        session_id = resp.get('session_id')
+        content = resp.get('content')
+        sig = resp.get('sig')
+        return operation, session_id, content, sig
 
-def msg_send_ke(socket, operation, session_id, content):
-    msg = {'type': operation, 'session_id': session_id, 'content': content}
-    # print(msg)
-    socket.send_json(msg)
+    def msg_send_no_sig(self, socket, operation, content):
+        msg = {'type': operation, 'session_id': self.asnode_id, 'content': content}
+        socket.send_json(msg)
 
-def msg_recv_ke(resp):
-    operation = resp.get('type')
-    session_id = resp.get('session_id')
-    content = resp.get('content')
-    return operation, session_id, content
-
-def msg_send(socket, operation, session_id, content, sk_d="", i=0):
-    if sk_d == "":
-        msg_send_ke(socket, operation, session_id, content)
-    else:
-        msg = {'type': operation, 'session_id': session_id, 'content': content}
-        sig = dili_sign(str(msg).encode('utf-8'), sk_d, i)
-        sig_str = base64.b64encode(sig).decode('utf-8')
-        msg_pack_send(socket, operation, session_id, content, sig_str)
-
-
-def msg_recv(socket):
-    msg = socket.recv_json()
-    if 'sig' not in msg:
-        return msg_recv_ke(msg)
-    else:
-        operation, session_id, content, sig = msg_pack_recv(msg)
-        msg = {'type': operation, 'session_id': session_id, 'content': content}
-        pk_d = user_info[session_id]['PK_SIGN']
-        sig_bytes = base64.b64decode(sig)
-        ver = dili_verify(str(msg).encode('utf-8'), sig_bytes, pk_d)
+    def msg_recv_no_sig(self, resp):
+        operation = resp.get('type')
+        session_id = resp.get('session_id')
+        content = resp.get('content')
         return operation, session_id, content
 
+    def msg_send(self, socket, operation, content, signed=False):
+        if self.KE_DONE == False and signed == False:
+            self.msg_send_no_sig(socket, operation, content)
+        else:
+            # print("sig")
+            msg = {'type': operation, 'session_id': self.asnode_id, 'content': content}
+            sig = dili_sign(str(msg).encode('utf-8'), self.sk_sign, self.sign_count)
+            sig_str = base64.b64encode(sig).decode('utf-8')
+            self.msg_send_with_sig(socket, operation, content, sig_str)
+            self.sign_count = (self.sign_count + 1) % 50
 
-def setup_phase(context, host, port, asnode_id, server_host, server_port, asnode_pk_sign, asnode_sk_sign, asnode_pk_se, asnode_sk_se):
-    socket = context.socket(zmq.REQ)
-    server = "{}:{}".format(server_host, server_port)
-    socket.connect(server)
-    server_info['SETUP_ADDRESS'] = server
-    pk_str = base64.b64encode(asnode_pk_sign).decode('utf-8')
-    msg_send(socket, 'NODE_KE_SIGN', asnode_id, pk_str)
-    # operation, server_id, content = msg_recv(socket)
-    # server_info['ID'] = server_id
-    # if operation == 'KE_SIGN':
-    #     pk_bytes = base64.b64decode(content)
-    #     server_info['PK_SIGN'] = pk_bytes
-    
-    print("Server Key Exchange Complete.")
-    
-    
-    socket = context.socket(zmq.REP)
-    socket.bind("{}:{}".format(host, port))
-    print("Listerning ...")
-    u_c = 0
-    while True:
-        operation, user_id, content = msg_recv(socket)
-        if user_id not in user_info:
-            user_info[user_id] = {}
-        if operation == 'USER_KE_SIGN':
-            user_info[user_id]['PK_SIGN'] = base64.b64decode(content)
-            pk_str = base64.b64encode(asnode_pk_sign).decode('utf-8')
-            msg_send(socket, 'NODE_KE_SIGN', asnode_id, pk_str)
-            print("Receive PK_SIGN from User {}.".format(user_id))
-        elif operation == 'USER_KE_SE':
-            user_info[user_id]['PK_SE'] = base64.b64decode(content)
-            pk_str = base64.b64encode(asnode_pk_se).decode('utf-8')
-            msg_send(socket, 'NODE_KE_SE', asnode_id, pk_str)
-            print("Receive PK_SE from User {}.".format(user_id))
-            # print(user_info)
-        elif operation == 'SE_START':
-            # print(user_info[user_id]['PK_SE'])
-            c, k = kyber_encaps(user_info[user_id]['PK_SE'])
-            user_info[user_id]['SHARED_SECRET'] = k
-            c_str = base64.b64encode(c).decode('utf-8')
-            # print(c_str)
-            msg_send(socket, 'SE_C', asnode_id, c_str, asnode_sk_sign, u_c)
-            u_c = u_c + 1
-            print("Sending SE_C to User {}.".format(user_id))
-            # print(k)
-        if u_c == USER_NUM:
-            break
-    
-    print("User Key/Shared Secret Exchange Complete.")
-    print("Setup Done.")
+    def msg_recv(self, socket):
+        msg = socket.recv_json()
+        if 'sig' not in msg:
+            return self.msg_recv_no_sig(msg)
+        else:
+            # print("sig")
+            operation, session_id, content, sig = self.msg_recv_with_sig(msg)
+            msg = {'type': operation, 'session_id': session_id, 'content': content}
+            pk_d = self.user_info[session_id]['PK_SIGN']
+            sig_bytes = base64.b64decode(sig)
+            ver = dili_verify(str(msg).encode('utf-8'), sig_bytes, pk_d)
+            return operation, session_id, content
 
-def masking_updates(context, host, port, asnode_pk_sign, asnode_sk_sign):
-    socket = context.socket(zmq.PULL)
-    socket.bind("{}:{}".format(host, port))
-    print("Listerning ...")
-    u_c = 0
-    t = -1
-    while True:
-        operation, user_id, content = msg_recv(socket)
-        if user_id not in user_info:
-            print("ERROR")
-        if operation == 'USER_MASK_UPDATE':
-            # print(content)
-            # print(type(content))
-            # print(np.fromstring(content, dtype=int, sep=' '))
-            content_list = ast.literal_eval(content)
-            user_info[user_id]['T'] = np.array(content_list)[0] # np.fromstring(content, dtype=int, sep=' ')[0]
-            t = user_info[user_id]['T']
-            u_c = u_c + 1
-            print("Receive USER_MASK_UPDATE from User {}.".format(user_id))
-        if u_c == USER_NUM:
-            break
-    
-    print("Masking Update Done.")
-    # print(t)
-    # print(type(t))
-    return int(t)
-    
+    def setup_phase(self, context, server_host, server_port, socket_setup):
+        socket = context.socket(zmq.REQ)
+        server = "{}:{}".format(server_host, server_port)
+        socket.connect(server)
+        self.server_info['SETUP_ADDRESS'] = server
+        pk_str = base64.b64encode(self.pk_sign).decode('utf-8')
+        self.msg_send(socket, 'NODE_KE_SIGN', pk_str)
+        
+        # print("Server Key Exchange Complete.")
+        
+        
+        self.socket_setup = socket_setup
+        u_c = 0
+        while True:
+            operation, user_id, content = self.msg_recv(socket_setup)
+            if user_id not in self.user_info:
+                self.user_info[user_id] = {}
+            if operation == 'USER_KE_SIGN':
+                self.user_info[user_id]['PK_SIGN'] = base64.b64decode(content)
+                pk_str = base64.b64encode(self.pk_sign).decode('utf-8')
+                self.msg_send(socket_setup, 'NODE_KE_SIGN', pk_str)
+                # print("Receive PK_SIGN from User {}.".format(user_id))
+            elif operation == 'USER_KE_SE':
+                self.user_info[user_id]['PK_SE'] = base64.b64decode(content)
+                pk_str = base64.b64encode(self.pk_ex).decode('utf-8')
+                self.msg_send(socket_setup, 'NODE_KE_SE', pk_str)
+                # print("Receive PK_SE from User {}.".format(user_id))
+                # print(user_info)
+            elif operation == 'SE_START':
+                # print(user_info[user_id]['PK_SE'])
+                c, k = kyber_encaps(self.user_info[user_id]['PK_SE'])
+                self.user_info[user_id]['SHARED_SECRET'] = k
+                c_str = base64.b64encode(c).decode('utf-8')
+                # print(c_str)
+                self.msg_send(socket_setup, 'SE_C', c_str, signed=True)
+                u_c = u_c + 1
+                # print("Sending SE_C to User {}.".format(user_id))
+                # print(k)
+            if u_c == self.USER_NUM:
+                break
+        
+        
+        self.KE_DONE = True
+        # print("User Key/Shared Secret Exchange Complete.")
+        # print("Setup Done.")
 
-def aggregation_updates(context, asnode_id, server_host, server_port, t, asnode_pk_sign, asnode_sk_sign):
-    # t = user_info[0]['T']
-    for user_id in user_info:
-        if t != user_info[user_id]['T']:
-            print("T is not same!")
-    
-    a_t = np.zeros(W_LEN)
-    for remote_id in user_info:
-        if 'SHARED_SECRET' in user_info[remote_id]:
-            x_a = user_info[remote_id]['SHARED_SECRET']
-            x_a_prf = gen_at(x_a, t, W_LEN)
-            a_t = a_t + x_a_prf
-    
-    a_t = a_t.astype(int)
-    m = a_t
-    m = np.insert(m, 0, t)
-    m = np.insert(m, 1, USER_NUM)
-    if 'PULL_SOCKET' in server_info:
-        socket = server_info['PULL_SOCKET']
-    else:
-        socket = context.socket(zmq.PUSH)
-        server_info['AGG_ADDRESS'] = "{}:{}".format(server_host, server_port)
-        socket.connect(server_info['AGG_ADDRESS'])
-        server_info['PULL_SOCKET'] = socket
-    msg = np.array2string(m, separator=', ')
-    msg_send(socket, 'NODE_MASK_UPDATE', asnode_id, msg, asnode_sk_sign, 0)
-    print("Sending Masking Update to Server: {}".format(msg))
-    print("Aggregation Update Done.")
+    def masking_updates(self, socket):
+        # print("Masking Update Start.")
+        # print("Listerning ...")
+        self.socket_update = socket
+        u_c = 0
+        
+        start_time = -1
+        # def check_timeout():
+        #     nonlocal u_c
+        #     while u_c < self.USER_NUM:
+        #         # if u_c == 1:
+        #         #     start_time = time.time()
+        #         print(u_c)
+        #         print(time.time() - start_time)
+        #         if time.time() - start_time > 20:
+        #             if u_c > self.USER_NUM - 2:
+        #                 return
+        #             exit() 
+        #         time.sleep(5) 
 
-def aggregation_phase(context, host, port, asnode_id, server_host, server_port, asnode_pk_sign, asnode_sk_sign):
-    t = masking_updates(context, host, port, asnode_pk_sign, asnode_sk_sign)
-    aggregation_updates(context, asnode_id, server_host, server_port, t, asnode_pk_sign, asnode_sk_sign)
+        # timeout_thread = Thread(target=check_timeout)
+        # timeout_thread.start()
+        
+        while True:
+            try:
+                operation, user_id, content = self.msg_recv(socket)
+            except zmq.Again as e:
+                # print("Receiving timed out.")
+                if u_c >= self.USER_NUM - 2:
+                    # print("Masking Update Done.")
+                    break
+                else:
+                    exit()
+            if start_time == -1:
+                start_time = time.time()
+            if user_id not in self.user_info:
+                print("ERROR")
+            if operation == 'USER_MASK_UPDATE':
+                content_list = ast.literal_eval(content)
+                self.user_info[user_id]['T'] = np.array(content_list)[0] # np.fromstring(content, dtype=int, sep=' ')[0]
+                # t = self.user_info[user_id]['T']
+                u_c = u_c + 1
+                # print("Receive USER_MASK_UPDATE from User {}.".format(user_id))
+                if self.iter_num != int(self.user_info[user_id]['T']):
+                    print("Iteration Numer from User {} is not correct: receive {} but should be {}.".format(user_id, self.user_info[user_id]['T'], self.iter_num))
+            if u_c >= self.USER_NUM:
+                print(u_c)
+                break
+        
+        end_time = time.time()
+        print("{} masking_updates: {}".format(self.asnode_id, end_time - start_time))
+        # print("Masking Update Done.")
+        # # print(t)
+        # # print(type(t))
+        # return int(t)
+        return u_c
+
+    def aggregation_updates(self, context, server_host, server_port, user_count):
+        # print("Aggregation Update Start.")
+        start_time = time.time()
+        a_t = np.zeros(self.VEC_LEN)
+        # print(time.time())
+        for remote_id in self.user_info:
+            if 'SHARED_SECRET' in self.user_info[remote_id]:
+                x_a = self.user_info[remote_id]['SHARED_SECRET']
+                x_a_prf = self.gen_at(x_a, self.iter_num, self.VEC_LEN)
+                a_t = a_t + x_a_prf
+        # print(time.time())
+        a_t = a_t.astype(int)
+        m = a_t
+        m = np.insert(m, 0, self.iter_num)
+        m = np.insert(m, 1, user_count)
+        if 'PULL_SOCKET' in self.server_info:
+            socket = self.server_info['PULL_SOCKET']
+        else:
+            socket = context.socket(zmq.PUSH)
+            self.server_info['AGG_ADDRESS'] = "{}:{}".format(server_host, server_port)
+            # print("{}:{}".format(server_host, server_port))
+            socket.connect(self.server_info['AGG_ADDRESS'])
+            self.server_info['PULL_SOCKET'] = socket
+        msg = np.array2string(m, separator=', ', threshold=np.inf)
+        self.msg_send(socket, 'NODE_MASK_UPDATE', msg)
+        self.iter_num = self.iter_num + 1
+        
+        end_time = time.time()
+        print("{} aggregation_updates: {}".format(self.asnode_id, end_time - start_time))
+        # print("Sending Masking Update to Server.")
+        # print("Sending Masking Update to Server: {}".format(msg))
+        # print("Aggregation Update Done.")
+
+    def aggregation_phase(self, context, server_host, server_port, socket_update):
+        u_c = self.masking_updates(socket_update)
+        self.aggregation_updates(context, server_host, server_port, u_c)
+
+
+    def preparing(self):
+        self.pk_sign, self.sk_sign = gen_pk("Dili")
+        self.pk_ex, self.sk_ex = gen_pk("Kyber")
+        
+        Dilithium2.precomputing(self.sk_sign, self.N_SIGN * 100)
+
+    def run_asnode(self, server_host, server_ports):
+        
+        context = zmq.Context()
+        
+        socket_setup = context.socket(zmq.REP)
+        socket_setup.bind("{}:{}".format(self.host, self.port_setup))
+        
+        
+        socket_update = context.socket(zmq.PULL)
+        socket_update.setsockopt(zmq.RCVTIMEO, 80000)
+        socket_update.bind("{}:{}".format(self.host, self.port_update))
+        
+        print("Listerning ...")
+        
+        """
+        PQ-FL Setup Phase
+        """
+        print("====================== Setup Phase ======================")
+        self.setup_phase(context, server_host, server_ports[0], socket_setup)
+        print("=========================================================\n\n")
+        
+        """
+        PQ-FL Aggregation Phase
+        """
+        print("====================== Aggregation Phase ======================")
+        self.aggregation_phase(context, server_host, server_ports[1], socket_update)
 
 
 
-def run_asnode(host, ports, server_host, server_ports, asnode_id):
-    asnode_pk_sign, asnode_sk_sign = gen_pk("Dili")
-    asnode_pk_se, asnode_sk_se = gen_pk("Kyber")
-    
-    Dilithium2.precomputing(asnode_sk_sign, N*100)
-    
-    context = zmq.Context()
-    
-    """
-    PQ-FL Setup Phase
-    """
-    print("====================== Setup Phase ======================")
-    setup_phase(context, host, ports[0], asnode_id, server_host, server_ports[0], asnode_pk_sign, asnode_sk_sign, asnode_pk_se, asnode_sk_se)
-    print("=========================================================\n\n")
-    
-    """
-    PQ-FL Aggregation Phase
-    """
-    print("====================== Aggregation Phase ======================")
-    aggregation_phase(context, host, ports[1], asnode_id, server_host, server_ports[1], asnode_pk_sign, asnode_sk_sign)
-    
-    
+"""
+Do not using Python Multithreading
+"""
+asnode_id = sys.argv[1]
 
-    
-    
-
-
-aid = sys.argv[1]
-init_port = sys.argv[2]
 host = "tcp://*"
-ports = []
-ports.append(int(init_port))
-ports.append(int(init_port)+1)
-ports.append(int(init_port)+2)
-# ports = [5600, 5601, 5602]
 server_host = "tcp://localhost"
 server_ports = [5500, 5501]
-run_asnode(host, ports, server_host, server_ports, aid)
+
+
+port_setup = 5600 + (int(asnode_id)-101) * 10
+# asnode_id = str(asnode_id)
+node = AssistingNode(asnode_id, host, port_setup, port_setup + 1)
+node.preparing()
+node.run_asnode(server_host, server_ports)
+
+
+
+"""
+Using Python Multithreading
+"""
+
+# # asnode_id = sys.argv[1]
+# # port_setup = int(sys.argv[2])
+# host = "tcp://*"
+# # ports = []
+# # ports.append(int(init_port))
+# # ports.append(int(init_port)+1)
+# # ports.append(int(init_port)+2)
+# # ports = [5600, 5601, 5602]
+# server_host = "tcp://localhost"
+# server_ports = [5500, 5501]
+
+# init_id = 101
+# init_asnode_port = 5600
+# threads = []
+# nodes = []
+# start_time = time.time()
+# for i in range(0, 10):
+#     print(init_asnode_port)
+#     port_setup = init_asnode_port
+#     asnode_id = str(init_id)
+#     node = AssistingNode(asnode_id, host, port_setup, port_setup + 1)
+#     node.preparing()
+#     nodes.append(node)
+#     init_id = init_id + 1
+#     init_asnode_port = init_asnode_port + 10
+
+# end_time = time.time()
+# print("Preparing Time: {}".format(end_time - start_time))
+
+# for i in range(0, 10):
+#     node = nodes[i]
+#     t = threading.Thread(target=node.run_asnode, args=(server_host, server_ports,))
+#     threads.append(t)
+#     t.start()
+#     # node.run_asnode(server_host, server_ports)
+
+# for t in threads:
+#     t.join()
+
+# print("All threads have finished.")
