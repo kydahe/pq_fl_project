@@ -165,6 +165,18 @@ class AssistingNode:
         # print("User Key/Shared Secret Exchange Complete.")
         # print("Setup Done.")
 
+    def masking_precomputing(self):
+        iter_num = 5
+        for remote_id in self.user_info:
+            if 'SHARED_SECRET' in self.user_info[remote_id]:
+                x_a = self.user_info[remote_id]['SHARED_SECRET']
+                if 'MASKINGS' not in self.user_info[remote_id]:
+                    self.user_info[remote_id]['MASKINGS'] = {}
+                for t in range(0, iter_num):
+                    x_a_prf = self.gen_at(x_a, t, self.VEC_LEN)
+                    self.user_info[remote_id]['MASKINGS'][t] = x_a_prf
+
+
     def masking_updates(self, socket):
         # print("Masking Update Start.")
         # print("Listerning ...")
@@ -230,7 +242,8 @@ class AssistingNode:
         for remote_id in self.user_info:
             if 'SHARED_SECRET' in self.user_info[remote_id]:
                 x_a = self.user_info[remote_id]['SHARED_SECRET']
-                x_a_prf = self.gen_at(x_a, self.iter_num, self.VEC_LEN)
+                # x_a_prf = self.gen_at(x_a, self.iter_num, self.VEC_LEN)
+                x_a_prf = self.user_info[remote_id]['MASKINGS'][self.iter_num]
                 a_t = a_t + x_a_prf
         # print(time.time())
         a_t = a_t.astype(int)
@@ -286,6 +299,9 @@ class AssistingNode:
         print("====================== Setup Phase ======================")
         self.setup_phase(context, server_host, server_ports[0], socket_setup)
         print("=========================================================\n\n")
+        
+        
+        self.masking_precomputing()
         
         """
         PQ-FL Aggregation Phase

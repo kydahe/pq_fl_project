@@ -56,6 +56,7 @@ class UserClient:
         self.sign_count = 0
         self.KE_DONE = False
         self.iter_num = 0
+        # self.precomputed_masking = {}
     
     def generate_vector(self):
         # r = gen_r()[:4]
@@ -84,6 +85,7 @@ class UserClient:
         
         print("gen_at time: {}".format(time.time()-start_time))
         return a_t
+
 
     def msg_send_with_sig(self, socket, operation, content, sig):
         msg = {'type': operation, 'session_id': self.user_id, 'content': content, 'sig': sig}
@@ -207,7 +209,19 @@ class UserClient:
         
         # print("Setup Done.")
         
+    def masking_precomputing(self):
+        iter_num = 5
+        for remote_id in self.asnode_info:
+            if 'SHARED_SECRET' in self.asnode_info[remote_id]:
+                x_a = self.asnode_info[remote_id]['SHARED_SECRET']
+                if 'MASKINGS' not in self.asnode_info[remote_id]:
+                    self.asnode_info[remote_id]['MASKINGS'] = {}
+                for t in range(0, iter_num):
+                    x_a_prf = self.gen_at(x_a, t, self.VEC_LEN)
+                    self.asnode_info[remote_id]['MASKINGS'][t] = x_a_prf
 
+
+        
     def masking_updates(self, context, w):
         start_time = time.time()
         a_t = np.zeros(self.VEC_LEN)
@@ -215,7 +229,8 @@ class UserClient:
         for remote_id in self.asnode_info:
             if 'SHARED_SECRET' in self.asnode_info[remote_id]:
                 x_a = self.asnode_info[remote_id]['SHARED_SECRET']
-                x_a_prf = self.gen_at(x_a, self.iter_num, len(w))
+                # x_a_prf = self.gen_at(x_a, self.iter_num, len(w))
+                x_a_prf = self.asnode_info[remote_id]['SHARED_SECRET'][self.iter_num]
                 a_t = a_t + x_a_prf
         
         # print(time.time())
@@ -326,6 +341,7 @@ class UserClient:
         print("=========================================================\n\n")
         
         # time.sleep(10)
+        self.masking_precomputing()
         
         """
         PQ-FL Aggregation phase
