@@ -219,7 +219,7 @@ class Server:
         self.socket_update = socket
         end_time = time.time()
         print("Masking Update Done: {}.".format(end_time - start_time))
-        return user_updates, node_updates
+        return user_updates, node_updates, end_time - start_time
 
     def calc_final_w(self, user_updates, node_updates):
         # check t
@@ -257,6 +257,9 @@ class Server:
         start_time = time.time()
         w = self.calc_final_w(user_updates, node_updates)
         
+        end_time = time.time()
+        print("Aggregation Update - calculate final vector: {}.".format(end_time - start_time))
+        
         # time.sleep(10)
         msg = np.array2string(w, separator=', ', threshold=np.inf)
         self.msg_send(socket, 'SERVER_AGGR_BROAD', msg)
@@ -266,13 +269,14 @@ class Server:
         # print(w)
         # print(msg)
         print("Aggregation Update Done: {}.".format(end_time - start_time))
+        return end_time - start_time
         
     def aggregation_phase(self, socket_update, socket_distribute):
         start_time = time.time()
-        user_updates, node_updates = self.masking_updates(socket_update)
-        self.aggregation_updates(socket_distribute, user_updates, node_updates)
+        user_updates, node_updates, time_1 = self.masking_updates(socket_update)
+        time_2 = self.aggregation_updates(socket_distribute, user_updates, node_updates)
         end_time = time.time()
-        print("Aggregation Done: {}.".format(end_time - start_time))
+        print("Aggregation Done: {} ({}).".format(time_1+time_2, end_time - start_time))
 
     def run_server(self):
         self.pk_sign, self.sk_sign = gen_pk("Dili")

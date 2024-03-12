@@ -23,6 +23,7 @@ import base64
 import numpy as np
 import ast
 import threading
+from Crypto.Cipher import AES
 
 
 from Cryptodome.PublicKey import ECC
@@ -69,13 +70,20 @@ class UserClient:
         return w
     
     def gen_at(self, x_a, t, length=16):
-        # TODO: precomputation between setup and collection
-        start_time = time.time()
+        # start_time = time.time()
         t_bytes = t.to_bytes(4, byteorder='big')
-        a_t_bytes = ascon_mac(x_a[0:16], t_bytes, "Ascon-Prf", length)
+        
+        # a_t_bytes = ascon_mac(x_a[0:16], t_bytes, "Ascon-Prf", length)
+        # a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
         # print("bytes len {}".format(len(a_t_bytes)))
-        a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
         # print(len(a_t))
+        
+        cipher = AES.new(x_a[0:16], AES.MODE_CTR, use_aesni='True')
+        a_t_bytes = cipher.encrypt(t_bytes)*4000
+        a_t = np.frombuffer(a_t_bytes, dtype=np.uint8) 
+        # print("bytes len {}".format(len(a_t_bytes)))
+        # print(cipher.nonce)
+        
         
         # nonce_bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00'
         # chacha_algo = ChaCha20.new(key=x_a[0:32], nonce=nonce_bytes)
@@ -83,7 +91,9 @@ class UserClient:
         # a_t_bytes = chacha_algo.encrypt(data) *4000
         # a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
         
-        print("gen_at time: {}".format(time.time()-start_time))
+        
+        
+        # print("gen_at time: {}".format(time.time()-start_time))
         return a_t
 
 
@@ -210,6 +220,7 @@ class UserClient:
         # print("Setup Done.")
         
     def masking_precomputing(self):
+        start_time = time.time()
         iter_num = 5
         for remote_id in self.asnode_info:
             if 'SHARED_SECRET' in self.asnode_info[remote_id]:
@@ -219,19 +230,26 @@ class UserClient:
                 for t in range(0, iter_num):
                     x_a_prf = self.gen_at(x_a, t, self.VEC_LEN)
                     self.asnode_info[remote_id]['MASKINGS'][t] = x_a_prf
+        
+        end_time = time.time()
+        print("{} masking_precomputing time = {}".format(self.user_id, end_time - start_time))
 
 
         
-    def masking_updates(self, context, w):
+    def masking_updates(self, context, w, precomputing):
         start_time = time.time()
         a_t = np.zeros(self.VEC_LEN)
         # print(time.time())
-        for remote_id in self.asnode_info:
-            if 'SHARED_SECRET' in self.asnode_info[remote_id]:
-                x_a = self.asnode_info[remote_id]['SHARED_SECRET']
-                # x_a_prf = self.gen_at(x_a, self.iter_num, len(w))
-                x_a_prf = self.asnode_info[remote_id]['SHARED_SECRET'][self.iter_num]
-                a_t = a_t + x_a_prf
+        if precomputing:
+            for remote_id in self.asnode_info:
+                if 'SHARED_SECRET' in self.asnode_info[remote_id]:
+                    a_t = a_t + self.asnode_info[remote_id]['SHARED_SECRET'][self.iter_num]
+        else:
+            for remote_id in self.asnode_info:
+                if 'SHARED_SECRET' in self.asnode_info[remote_id]:
+                        x_a = self.asnode_info[remote_id]['SHARED_SECRET']
+                        x_a_prf = self.gen_at(x_a, self.iter_num, len(w))
+                        a_t = a_t + x_a_prf
         
         # print(time.time())
         a_t = a_t.astype(int)
@@ -258,8 +276,8 @@ class UserClient:
             self.msg_send(socket, 'USER_MASK_UPDATE', msg)
             # print("Sending Masking Update to Asnode {}: {}".format(remote_id, msg))
         
-        end_time = time.time()
-        print("{} masking_updates asnode done: {}".format(self.user_id, end_time - start_time))
+        # end_time = time.time()
+        # print("{} masking_updates asnode done: {}".format(self.user_id, end_time - start_time))
         for server_id in self.server_info:
         #     if 'PULL_SOCKET' in self.server_info[server_id]:
         #         socket = self.server_info[server_id]['PULL_SOCKET']
@@ -306,8 +324,8 @@ class UserClient:
         print("{} aggregation_updates: {}".format(self.user_id, end_time - start_time))
         # print("Aggregation Update Done.")
 
-    def aggregation_phase(self, context, w):
-        self.masking_updates(context, w)
+    def aggregation_phase(self, context, w, precomputing=False):
+        self.masking_updates(context, w, precomputing)
         # time.sleep(10)
         self.aggregation_updates(context)
 
@@ -347,7 +365,7 @@ class UserClient:
         PQ-FL Aggregation phase
         """
         print("====================== Aggregation Phase ======================")
-        self.aggregation_phase(context, w)
+        self.aggregation_phase(context, w, precomputing=True)
 
 
 

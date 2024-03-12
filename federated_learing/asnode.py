@@ -23,6 +23,7 @@ import base64
 import numpy as np
 import ast
 import threading
+from Crypto.Cipher import AES
 
 
 from Cryptodome.PublicKey import ECC
@@ -61,8 +62,14 @@ class AssistingNode:
     def gen_at(self, x_a, t, length=16):
         # start_time = time.time()
         t_bytes = t.to_bytes(4, byteorder='big')
-        a_t_bytes = ascon_mac(x_a[0:16], t_bytes, "Ascon-Prf", length)
+        
+        # a_t_bytes = ascon_mac(x_a[0:16], t_bytes, "Ascon-Prf", length)
+        # a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
+        
+        cipher = AES.new(x_a[0:16], AES.MODE_CTR, use_aesni='True')
+        a_t_bytes = cipher.encrypt(t_bytes)*4000
         a_t = np.frombuffer(a_t_bytes, dtype=np.uint8)
+        # print(cipher.nonce)
         
         
         # nonce_bytes = b'\x00\x00\x00\x00\x00\x00\x00\x00'
@@ -166,6 +173,7 @@ class AssistingNode:
         # print("Setup Done.")
 
     def masking_precomputing(self):
+        start_time = time.time()
         iter_num = 5
         for remote_id in self.user_info:
             if 'SHARED_SECRET' in self.user_info[remote_id]:
@@ -175,6 +183,8 @@ class AssistingNode:
                 for t in range(0, iter_num):
                     x_a_prf = self.gen_at(x_a, t, self.VEC_LEN)
                     self.user_info[remote_id]['MASKINGS'][t] = x_a_prf
+        end_time = time.time()
+        print("{} masking_precomputing time = {}".format(self.asnode_id, end_time - start_time))
 
 
     def masking_updates(self, socket):
@@ -184,21 +194,6 @@ class AssistingNode:
         u_c = 0
         
         start_time = -1
-        # def check_timeout():
-        #     nonlocal u_c
-        #     while u_c < self.USER_NUM:
-        #         # if u_c == 1:
-        #         #     start_time = time.time()
-        #         print(u_c)
-        #         print(time.time() - start_time)
-        #         if time.time() - start_time > 20:
-        #             if u_c > self.USER_NUM - 2:
-        #                 return
-        #             exit() 
-        #         time.sleep(5) 
-
-        # timeout_thread = Thread(target=check_timeout)
-        # timeout_thread.start()
         
         while True:
             try:
@@ -223,7 +218,7 @@ class AssistingNode:
                 if self.iter_num != int(self.user_info[user_id]['T']):
                     print("Iteration Numer from User {} is not correct: receive {} but should be {}.".format(user_id, self.user_info[user_id]['T'], self.iter_num))
             if u_c >= self.USER_NUM:
-                print(u_c)
+                # print(u_c)
                 break
         
         end_time = time.time()
@@ -234,22 +229,30 @@ class AssistingNode:
         # return int(t)
         return u_c
 
-    def aggregation_updates(self, context, server_host, server_port, user_count):
+    def aggregation_updates(self, context, server_host, server_port, user_count, precomputing):
         # print("Aggregation Update Start.")
         start_time = time.time()
         a_t = np.zeros(self.VEC_LEN)
         # print(time.time())
-        for remote_id in self.user_info:
-            if 'SHARED_SECRET' in self.user_info[remote_id]:
-                x_a = self.user_info[remote_id]['SHARED_SECRET']
-                # x_a_prf = self.gen_at(x_a, self.iter_num, self.VEC_LEN)
-                x_a_prf = self.user_info[remote_id]['MASKINGS'][self.iter_num]
-                a_t = a_t + x_a_prf
+        if precomputing:
+            for remote_id in self.user_info:
+                if 'SHARED_SECRET' in self.user_info[remote_id]:
+                    a_t = a_t + self.user_info[remote_id]['MASKINGS'][self.iter_num]
+        else:
+            for remote_id in self.user_info:
+                if 'SHARED_SECRET' in self.user_info[remote_id]:
+                    x_a = self.user_info[remote_id]['SHARED_SECRET']
+                    x_a_prf = self.gen_at(x_a, self.iter_num, self.VEC_LEN)
+                    a_t = a_t + x_a_prf
+        
         # print(time.time())
         a_t = a_t.astype(int)
         m = a_t
         m = np.insert(m, 0, self.iter_num)
         m = np.insert(m, 1, user_count)
+        end_time = time.time()
+        print("{} aggregation_updates vector: {}".format(self.asnode_id, end_time - start_time))
+        
         if 'PULL_SOCKET' in self.server_info:
             socket = self.server_info['PULL_SOCKET']
         else:
@@ -268,9 +271,9 @@ class AssistingNode:
         # print("Sending Masking Update to Server: {}".format(msg))
         # print("Aggregation Update Done.")
 
-    def aggregation_phase(self, context, server_host, server_port, socket_update):
+    def aggregation_phase(self, context, server_host, server_port, socket_update, precomputing=False):
         u_c = self.masking_updates(socket_update)
-        self.aggregation_updates(context, server_host, server_port, u_c)
+        self.aggregation_updates(context, server_host, server_port, u_c, precomputing)
 
 
     def preparing(self):
@@ -307,7 +310,7 @@ class AssistingNode:
         PQ-FL Aggregation Phase
         """
         print("====================== Aggregation Phase ======================")
-        self.aggregation_phase(context, server_host, server_ports[1], socket_update)
+        self.aggregation_phase(context, server_host, server_ports[1], socket_update, precomputing=True)
 
 
 
