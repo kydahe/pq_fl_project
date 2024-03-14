@@ -39,9 +39,9 @@ class Server:
         self.asnode_info = {}
         self.user_info = {}
         self.N_SIGN = 50
-        self.USER_NUM = 2
-        self.ASNODE_NUM = 2
-        self.VEC_LEN = 26010
+        self.USER_NUM = 10
+        self.ASNODE_NUM = 10
+        self.VEC_LEN = 16000
         self.sk_sign = b''
         self.pk_sign = b''
         self.server_id = server_id

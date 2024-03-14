@@ -3,7 +3,7 @@ import subprocess
 
 
 init_nid = 101
-node_num = 2
+node_num = 10
 
 def run_script(node_id):
     cmd = f"python3 asnode.py {node_id}"

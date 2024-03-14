@@ -58,8 +58,8 @@ class UserClient:
         self.server_info = {}
         self.asnode_info = {}
         self.N_SIGN = 50
-        self.NODE_NUM = 2
-        self.VEC_LEN = 26010 # 16000
+        self.NODE_NUM = 10
+        self.VEC_LEN = 16000 #  26010
         self.sk_sign = b''
         self.pk_sign = b''
         self.sk_ex = b''
@@ -113,6 +113,7 @@ class UserClient:
 
     def msg_send_with_sig(self, socket, operation, content, sig):
         msg = {'type': operation, 'session_id': self.user_id, 'content': content, 'sig': sig}
+        print("msg_send_with_sig: {}".format(time.time()))
         socket.send_json(msg)
 
     def msg_recv_with_sig(self, resp):
@@ -130,13 +131,14 @@ class UserClient:
         operation = resp.get('type')
         session_id = resp.get('session_id')
         content = resp.get('content')
-        return operation, session_id, content
+        return operation, session_id, content, 0
 
     def msg_send(self, socket, operation, content, signed=False):
         if self.KE_DONE == False and signed == False:
             self.msg_send_no_sig(socket, operation, content)
         else:
             # print("sig")
+            print
             msg = {'type': operation, 'session_id': self.user_id, 'content': content}
             sig = dili_sign(str(msg).encode('utf-8'), self.sk_sign, self.sign_count)
             sig_str = base64.b64encode(sig).decode('utf-8')
@@ -149,6 +151,7 @@ class UserClient:
             return self.msg_recv_no_sig(msg)
         else:
             # print("sig")
+            start_time = time.time()
             operation, session_id, content, sig = self.msg_recv_with_sig(msg)
             msg = {'type': operation, 'session_id': session_id, 'content': content}
             if session_id in self.asnode_info:
@@ -157,7 +160,8 @@ class UserClient:
                 pk_d = self.server_info[session_id]['PK_SIGN']
             sig_bytes = base64.b64decode(sig)
             ver = dili_verify(str(msg).encode('utf-8'), sig_bytes, pk_d)
-            return operation, session_id, content
+            end_time = time.time()
+            return operation, session_id, content, end_time - start_time
 
     
     def train(self, model, train_loader, optimizer, device, delta=1e-5):
@@ -247,7 +251,7 @@ class UserClient:
         # Exchange Public Key with server
         pk_str = base64.b64encode(self.pk_sign).decode('utf-8')
         self.msg_send(socket, 'USER_KE_SIGN', pk_str)
-        operation, server_id, content = self.msg_recv(socket)
+        operation, server_id, content, _ = self.msg_recv(socket)
         if server_id not in self.server_info:
             self.server_info[server_id] = {}
         self.server_info[server_id]['SETUP_ADDRESS'] = server
@@ -273,7 +277,7 @@ class UserClient:
             # Exchange Public Key with asnode
             pk_str = base64.b64encode(self.pk_sign).decode('utf-8')
             self.msg_send(socket, 'USER_KE_SIGN', pk_str)
-            operation, asnode_id, content = self.msg_recv(socket)
+            operation, asnode_id, content, _ = self.msg_recv(socket)
             if asnode_id not in self.asnode_info:
                 self.asnode_info[asnode_id] = {}
             self.asnode_info[asnode_id]['SETUP_ADDRESS'] = node
@@ -284,7 +288,7 @@ class UserClient:
             
             pk_str = base64.b64encode(self.pk_ex).decode('utf-8')
             self.msg_send(socket, 'USER_KE_SE', pk_str)
-            operation, asnode_id, content = self.msg_recv(socket)
+            operation, asnode_id, content, _ = self.msg_recv(socket)
             if operation == 'NODE_KE_SE':
                 pk_bytes = base64.b64decode(content)
                 self.asnode_info[asnode_id]['PK_SE'] = pk_bytes
@@ -295,7 +299,7 @@ class UserClient:
 
             # Secret Exchange
             self.msg_send(socket, 'SE_START', "SE_START", signed=True)
-            operation, asnode_id, content = self.msg_recv(socket)
+            operation, asnode_id, content, _ = self.msg_recv(socket)
             if operation == 'SE_C':
                 c_bytes = base64.b64decode(content)
                 # print(content)
@@ -355,7 +359,10 @@ class UserClient:
         end_time = time.time()
         print("{} masking_updates vector: {}".format(self.user_id, end_time - start_time))
         
+        time_arr = []
         for remote_id in self.asnode_info:
+            start_time_1 = time.time()
+            print("{} masking_sending to asnode {} (start): {}".format(self.user_id, remote_id, start_time_1))
             if 'PULL_SOCKET' in self.asnode_info[remote_id]:
                 socket = self.asnode_info[remote_id]['PULL_SOCKET']
             else:
@@ -364,11 +371,17 @@ class UserClient:
                 self.asnode_info[remote_id]['PULL_SOCKET'] = socket
             msg = np.array2string(m_1, separator=', ', threshold=np.inf)
             self.msg_send(socket, 'USER_MASK_UPDATE', msg)
+            end_time_1 = time.time()
+            print("{} masking_sending to asnode {}: {}".format(self.user_id, remote_id, end_time_1 - start_time_1))
+            time_arr.append(end_time_1 - start_time_1)
+        
+        print("{} masking_sending to asnode (average): {}".format(self.user_id, np.mean(np.array(time_arr))))
             # print("Sending Masking Update to Asnode {}: {}".format(remote_id, msg))
         
         # end_time = time.time()
         # print("{} masking_updates asnode done: {}".format(self.user_id, end_time - start_time))
         for server_id in self.server_info:
+            start_time_1 = time.time()
         #     if 'PULL_SOCKET' in self.server_info[server_id]:
         #         socket = self.server_info[server_id]['PULL_SOCKET']
         #     else:
@@ -377,6 +390,8 @@ class UserClient:
             self.server_info[server_id]['PULL_SOCKET'] = socket
             msg = np.array2string(m, separator=', ', threshold=np.inf)
             self.msg_send(socket, 'USER_MASK_UPDATE', msg)
+            end_time_1 = time.time()
+            print("{} masking_sending to server: {}".format(self.user_id, end_time_1 - start_time_1))
         
         end_time = time.time()
         print("{} masking_updates: {}".format(self.user_id, end_time - start_time))
@@ -387,6 +402,7 @@ class UserClient:
     def aggregation_updates(self, context):
         start_time = time.time()
         update_vec = np.zeros(self.VEC_LEN)
+        used_time = 0
         for server_id in self.server_info:
             if 'SUB_SOCKET' in self.server_info[server_id]:
                 socket = self.server_info[server_id]['SUB_SOCKET']
@@ -399,7 +415,7 @@ class UserClient:
                 socket.setsockopt(zmq.SUBSCRIBE, b'')
                 self.server_info[server_id]['SUB_SOCKET'] = socket
             
-            operation, remote_id, content = self.msg_recv(socket)
+            operation, remote_id, content, used_time = self.msg_recv(socket)
             # print(content)
             if operation == 'SERVER_AGGR_BROAD':
                 content_list = ast.literal_eval(content)
@@ -411,6 +427,7 @@ class UserClient:
         self.iter_num = self.iter_num + 1
         
         
+        print("{} get new update vector: {}".format(self.user_id, used_time))
         end_time = time.time()
         print("{} aggregation_updates: {}".format(self.user_id, end_time - start_time))
         # print("Aggregation Update Done.")
@@ -456,13 +473,16 @@ class UserClient:
         
         
         print("====================== Local Training ======================")
-        model, optimizer, train_loader, test_loader, device = self.get_model()
-        model, train_loader, optimizer = self.local_training(model, train_loader, optimizer, device)
+        # model, optimizer, train_loader, test_loader, device = self.get_model()
+        start_time = time.time()
+        # model, train_loader, optimizer = self.local_training(model, train_loader, optimizer, device)
         
-        client_update_vector = get_gradients(model)
-        flat_gradients, mid_gradients = gradients_to_np_array(client_update_vector)
-        original_shapes = get_shape(model, mid_gradients)
-        # restored_gradients = np_array_to_gradients(flat_gradients, original_shapes, device)
+        # client_update_vector = get_gradients(model)
+        # flat_gradients, mid_gradients = gradients_to_np_array(client_update_vector)
+        # original_shapes = get_shape(model, mid_gradients)
+        
+        flat_gradients = self.generate_vector()
+        print("{} Training gradient generation: {}".format(self.user_id, time.time() - start_time))
         
         
         """
@@ -471,12 +491,15 @@ class UserClient:
         print("====================== Aggregation Phase ======================")
         update_vec = self.aggregation_phase(context, flat_gradients, precomputing=True)
         
-        print("====================== Update Aggregation Vector ======================")
-        restored_gradients = np_array_to_gradients(update_vec, original_shapes, device)
-        # print(get_parameters(model))
-        model = self.update_model_gradients(model, restored_gradients)
-        model = self.update_model_parameters(model)
-        # print(get_parameters(model))
+        # print("====================== Update Aggregation Vector ======================")
+        
+        # start_time = time.time()
+        # restored_gradients = np_array_to_gradients(update_vec, original_shapes, device)
+        # # print(get_parameters(model))
+        # model = self.update_model_gradients(model, restored_gradients)
+        # model = self.update_model_parameters(model)
+        # print("{} New gradient update: {}".format(self.user_id, time.time() - start_time))
+        # # print(get_parameters(model))
 
 
 

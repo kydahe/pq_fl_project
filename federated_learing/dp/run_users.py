@@ -5,7 +5,7 @@ import subprocess
 
 
 init_uid = 1
-user_num = 2
+user_num = 10
 
 # for i in range(0, user_num):
 #     user_id = init_uid + i

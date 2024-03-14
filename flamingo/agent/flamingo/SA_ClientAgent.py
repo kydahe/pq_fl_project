@@ -200,7 +200,8 @@ class SA_ClientAgent(Agent):
     def sendVectors(self, currentTime):
 
         dt_protocol_start = pd.Timestamp('now')
-
+        start_time = time.time()
+        start_time_1 = time.time()
         # Find this client's neighbors: parse graph from PRG(PRF(iter, root_seed))
         self.neighbors_list = param.findNeighbors(param.root_seed, self.current_iteration, self.num_clients, self.id, self.neighborhood_size)
         if __debug__:
@@ -224,8 +225,8 @@ class SA_ClientAgent(Agent):
         committee_pubkeys = {}
         for id in self.user_committee:
             committee_pubkeys[id] = util.read_pk(f"pki_files/client{id}.pem")
-            
-
+        
+        
         # separately encrypt each share
         enc_mi_shares = []
         # id is the x-axis
@@ -245,6 +246,9 @@ class SA_ClientAgent(Agent):
             enc_mi_shares.append((tmp, nonce))
             cnt += 1
 
+        # print("SymAuthEnc: {}".format(time.time() - start_time_1))
+        
+        start_time_1 = time.time()
         # Compute mask, compute masked vector
         # PRG individual mask
         prg_mi_holder = ChaCha20.new(key=mi_bytes, nonce=param.nonce)
@@ -263,7 +267,8 @@ class SA_ClientAgent(Agent):
             
             hash_object = SHA256.new(data=(px+py))
             neighbor_pairwise_secret_bytes[id] = hash_object.digest()[0:self.key_length] 
-          
+        
+        
 
         neighbor_pairwise_mask_seed_group = {}
         neighbor_pairwise_mask_seed_bytes = {}
@@ -294,7 +299,6 @@ class SA_ClientAgent(Agent):
             neighbor_pairwise_mask_seed_bytes[id] = hash_object.digest()[0:self.key_length]
         
         
-        # start_time = time.time()
         prg_pairwise = {}
         for id in self.neighbors_list:
             # s = time.time()
@@ -333,9 +337,10 @@ class SA_ClientAgent(Agent):
             else:
                 raise RuntimeError("id itself appears in its neighbor list")
 
-        print(len(vec))
-        # print("{}".format(time.time() - start_time))
-
+        # print(len(vec))
+        # print("Masking {}".format(time.time() - start_time_1))
+        # start_time_1 = time.time()
+        
         # compute encryption of H(t)^{r_ij} (already a group element), only for < relation
         cipher_msg = {}
         
@@ -348,6 +353,9 @@ class SA_ClientAgent(Agent):
             self.logger.info(f"client {self.id} computation delay for vector: {client_comp_delay}")
             self.logger.info(f"client {self.id} sends vector at {currentTime + client_comp_delay}")
         
+        # print("AsymEnc {}".format(time.time() - start_time_1))
+        # start_time_1 = time.time()
+        
         # Send the vector to the server
         self.sendMessage(self.serviceAgentID,
                          Message({"msg": "VECTOR",
@@ -359,9 +367,11 @@ class SA_ClientAgent(Agent):
                                   }),
                          tag="comm_key_generation")
 
+        # print("Sending Message {}".format(time.time() - start_time_1))
+        # print("sendVectors {}".format(time.time() - start_time))
   
     def signSendLabels(self, currentTime, msg_to_sign):
-
+        start_time = time.time()
         msg_to_sign = dill.dumps(msg_to_sign)
         hash_container = SHA256.new(msg_to_sign)
         signer = DSS.new(self.key, 'fips-186-3')
@@ -377,6 +387,7 @@ class SA_ClientAgent(Agent):
                                   "signed_labels": client_signed_labels,
                                   }),
                         tag="comm_sign_client")
+        # print("signSendLabels {}".format(time.time() - start_time))
   
 
     def decryptSendShares(self, dec_target_pairwise, dec_target_mi, client_id_list):
