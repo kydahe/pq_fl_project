@@ -10,7 +10,7 @@ vector_type = 'uint32'
 # committee_size = 60
 committee_size = 10
 # fraction = 1/3
-fraction = 1
+fraction = 0.3
 user_fraction = 1
 fixed_key = b"abcd"
 

@@ -222,6 +222,7 @@ class SA_ClientAgent(Agent):
             point_threshold=int(param.fraction * len(self.user_committee)), 
             num_points=len(self.user_committee), prime=self.prime)
 
+        # print(int(param.fraction * len(self.user_committee)))
         committee_pubkeys = {}
         for id in self.user_committee:
             committee_pubkeys[id] = util.read_pk(f"pki_files/client{id}.pem")

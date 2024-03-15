@@ -111,10 +111,11 @@ class UserClient:
         return a_t
 
 
-    def msg_send_with_sig(self, socket, operation, content, sig):
+    def msg_send_with_sig(self, operation, content, sig):
         msg = {'type': operation, 'session_id': self.user_id, 'content': content, 'sig': sig}
-        print("msg_send_with_sig: {}".format(time.time()))
-        socket.send_json(msg)
+        # print("msg_send_with_sig: {}".format(time.time()))
+        # socket.send_json(msg)
+        return msg
 
     def msg_recv_with_sig(self, resp):
         operation = resp.get('type')
@@ -123,9 +124,10 @@ class UserClient:
         sig = resp.get('sig')
         return operation, session_id, content, sig
 
-    def msg_send_no_sig(self, socket, operation, content):
+    def msg_send_no_sig(self, operation, content):
         msg = {'type': operation, 'session_id': self.user_id, 'content': content}
-        socket.send_json(msg)
+        # socket.send_json(msg)
+        return msg
 
     def msg_recv_no_sig(self, resp):
         operation = resp.get('type')
@@ -133,17 +135,18 @@ class UserClient:
         content = resp.get('content')
         return operation, session_id, content, 0
 
-    def msg_send(self, socket, operation, content, signed=False):
+    def msg_send(self, operation, content, signed=False):
         if self.KE_DONE == False and signed == False:
-            self.msg_send_no_sig(socket, operation, content)
+            msg_to_sent = self.msg_send_no_sig(operation, content)
         else:
             # print("sig")
             print
             msg = {'type': operation, 'session_id': self.user_id, 'content': content}
             sig = dili_sign(str(msg).encode('utf-8'), self.sk_sign, self.sign_count)
             sig_str = base64.b64encode(sig).decode('utf-8')
-            self.msg_send_with_sig(socket, operation, content, sig_str)
+            msg_to_sent = self.msg_send_with_sig(operation, content, sig_str)
             self.sign_count = (self.sign_count + 1) % 50
+        return msg_to_sent
 
     def msg_recv(self, socket):
         msg = socket.recv_json()
@@ -242,7 +245,6 @@ class UserClient:
 
     def setup_phase(self, context, asnodes, node_aggs, server, server_agg, server_broad):
         
-        
         # Connecting to Server
         # print("Connecting to Server ...")
         socket = context.socket(zmq.REQ)
@@ -250,7 +252,8 @@ class UserClient:
 
         # Exchange Public Key with server
         pk_str = base64.b64encode(self.pk_sign).decode('utf-8')
-        self.msg_send(socket, 'USER_KE_SIGN', pk_str)
+        msg = self.msg_send('USER_KE_SIGN', pk_str)
+        socket.send_json(msg)
         operation, server_id, content, _ = self.msg_recv(socket)
         if server_id not in self.server_info:
             self.server_info[server_id] = {}
@@ -276,7 +279,8 @@ class UserClient:
 
             # Exchange Public Key with asnode
             pk_str = base64.b64encode(self.pk_sign).decode('utf-8')
-            self.msg_send(socket, 'USER_KE_SIGN', pk_str)
+            msg = self.msg_send('USER_KE_SIGN', pk_str)
+            socket.send_json(msg)
             operation, asnode_id, content, _ = self.msg_recv(socket)
             if asnode_id not in self.asnode_info:
                 self.asnode_info[asnode_id] = {}
@@ -287,7 +291,8 @@ class UserClient:
                 self.asnode_info[asnode_id]['PK_SIGN'] = pk_bytes
             
             pk_str = base64.b64encode(self.pk_ex).decode('utf-8')
-            self.msg_send(socket, 'USER_KE_SE', pk_str)
+            msg = self.msg_send('USER_KE_SE', pk_str)
+            socket.send_json(msg)
             operation, asnode_id, content, _ = self.msg_recv(socket)
             if operation == 'NODE_KE_SE':
                 pk_bytes = base64.b64decode(content)
@@ -298,7 +303,8 @@ class UserClient:
             # print(asnode_info)
 
             # Secret Exchange
-            self.msg_send(socket, 'SE_START', "SE_START", signed=True)
+            msg = self.msg_send('SE_START', "SE_START", signed=True)
+            socket.send_json(msg)
             operation, asnode_id, content, _ = self.msg_recv(socket)
             if operation == 'SE_C':
                 c_bytes = base64.b64decode(content)
@@ -359,42 +365,53 @@ class UserClient:
         end_time = time.time()
         print("{} masking_updates vector: {}".format(self.user_id, end_time - start_time))
         
+        start_time_1 = time.time()
+        msg_asnode = np.array2string(m_1, separator=', ', threshold=np.inf)
+        msg_asnode = self.msg_send('USER_MASK_UPDATE', msg_asnode)
+        
+        msg_server = np.array2string(m, separator=', ', threshold=np.inf)
+        msg_server = self.msg_send('USER_MASK_UPDATE', msg_server)
+        
+        end_time = time.time()
+        print("{} masking_updates message signing: {}".format(self.user_id, end_time - start_time_1))
+        print("{} masking_updates message construction: {}".format(self.user_id, end_time - start_time))
+        
+        
         time_arr = []
         for remote_id in self.asnode_info:
-            start_time_1 = time.time()
-            print("{} masking_sending to asnode {} (start): {}".format(self.user_id, remote_id, start_time_1))
+            # start_time_1 = time.time()
+            # print("{} masking_sending to asnode {} (start): {}".format(self.user_id, remote_id, start_time_1))
             if 'PULL_SOCKET' in self.asnode_info[remote_id]:
                 socket = self.asnode_info[remote_id]['PULL_SOCKET']
             else:
                 socket = context.socket(zmq.PUSH)
                 socket.connect(self.asnode_info[remote_id]['AGG_ADDRESS'])
                 self.asnode_info[remote_id]['PULL_SOCKET'] = socket
-            msg = np.array2string(m_1, separator=', ', threshold=np.inf)
-            self.msg_send(socket, 'USER_MASK_UPDATE', msg)
-            end_time_1 = time.time()
-            print("{} masking_sending to asnode {}: {}".format(self.user_id, remote_id, end_time_1 - start_time_1))
-            time_arr.append(end_time_1 - start_time_1)
-        
-        print("{} masking_sending to asnode (average): {}".format(self.user_id, np.mean(np.array(time_arr))))
+            socket.send_json(msg_asnode)
+            # end_time_1 = time.time()
             # print("Sending Masking Update to Asnode {}: {}".format(remote_id, msg))
+            # print("{} masking_sending to asnode {}: {}".format(self.user_id, remote_id, end_time_1 - start_time_1))
+            # time_arr.append(end_time_1 - start_time_1)
+        
+        # print("{} masking_sending to asnode (average): {}".format(self.user_id, np.mean(np.array(time_arr))))
+        
         
         # end_time = time.time()
         # print("{} masking_updates asnode done: {}".format(self.user_id, end_time - start_time))
         for server_id in self.server_info:
-            start_time_1 = time.time()
+            # start_time_1 = time.time()
         #     if 'PULL_SOCKET' in self.server_info[server_id]:
         #         socket = self.server_info[server_id]['PULL_SOCKET']
         #     else:
             socket = context.socket(zmq.PUSH)
             socket.connect(self.server_info[server_id]['AGG_ADDRESS'])
             self.server_info[server_id]['PULL_SOCKET'] = socket
-            msg = np.array2string(m, separator=', ', threshold=np.inf)
-            self.msg_send(socket, 'USER_MASK_UPDATE', msg)
-            end_time_1 = time.time()
-            print("{} masking_sending to server: {}".format(self.user_id, end_time_1 - start_time_1))
+            socket.send_json(msg_server)
+            # end_time_1 = time.time()
+            # print("{} masking_sending to server: {}".format(self.user_id, end_time_1 - start_time_1))
         
-        end_time = time.time()
-        print("{} masking_updates: {}".format(self.user_id, end_time - start_time))
+        # end_time = time.time()
+        # print("{} masking_updates: {}".format(self.user_id, end_time - start_time))
         # print("Sending Masking Update to Server: {}".format(msg))
         # print("Masking Update Done.")
 

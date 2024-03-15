@@ -394,9 +394,9 @@ class Kernel:
       log_print ("Kernel applied latency {}, accumulated delay {}, one-time delay {} on sendMessage from: {} to {}, scheduled for {}",
                  latency, self.currentAgentAdditionalDelay, delay, self.agents[sender].name, self.agents[recipient].name,
                  self.fmtTime(deliverAt))
-      print("Kernel applied latency {}, accumulated delay {}, one-time delay {} on sendMessage from: {} to {}, scheduled for {}".format(
-                 latency, self.currentAgentAdditionalDelay, delay, self.agents[sender].name, self.agents[recipient].name,
-                 self.fmtTime(deliverAt)))
+      # print("Kernel applied latency {}, accumulated delay {}, one-time delay {} on sendMessage from: {} to {}, scheduled for {}".format(
+      #            latency, self.currentAgentAdditionalDelay, delay, self.agents[sender].name, self.agents[recipient].name,
+      #            self.fmtTime(deliverAt)))
     else:
       latency = self.agentLatency[sender][recipient]
       noise = self.random_state.choice(len(self.latencyNoise), 1, self.latencyNoise)[0]
@@ -404,15 +404,15 @@ class Kernel:
       log_print ("Kernel applied latency {}, noise {}, accumulated delay {}, one-time delay {} on sendMessage from: {} to {}, scheduled for {}",
                  latency, noise, self.currentAgentAdditionalDelay, delay, self.agents[sender].name, self.agents[recipient].name,
                  self.fmtTime(deliverAt))
-      print("Kernel applied latency {}, noise {}, accumulated delay {}, one-time delay {} on sendMessage from: {} to {}, scheduled for {}".format(
-                 latency, noise, self.currentAgentAdditionalDelay, delay, self.agents[sender].name, self.agents[recipient].name,
-                 self.fmtTime(deliverAt)))
+      # print("Kernel applied latency {}, noise {}, accumulated delay {}, one-time delay {} on sendMessage from: {} to {}, scheduled for {}".format(
+      #            latency, noise, self.currentAgentAdditionalDelay, delay, self.agents[sender].name, self.agents[recipient].name,
+      #            self.fmtTime(deliverAt)))
 
     # Finally drop the message in the queue with priority == delivery time.
     self.messages.put((deliverAt, (recipient, MessageType.MESSAGE, msg)))
 
     log_print ("Sent time: {}, current time {}, computation delay {}", sentTime, self.currentTime, self.agentComputationDelays[sender])
-    print("Sent time: {}, current time {}, computation delay {}".format(sentTime, self.currentTime, self.agentComputationDelays[sender]))
+    # print("Sent time: {}, current time {}, computation delay {}".format(sentTime, self.currentTime, self.agentComputationDelays[sender]))
     log_print ("Message queued: {}", msg)
 
 
