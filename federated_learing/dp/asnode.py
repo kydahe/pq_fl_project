@@ -45,8 +45,8 @@ class AssistingNode:
         self.user_info = {}
         self.server_info = {}
         self.N_SIGN = 50
-        self.USER_NUM = 10
-        self.VEC_LEN = 16000
+        self.USER_NUM = 200
+        self.VEC_LEN = 16000  # 26010
         self.sk_sign = b''
         self.pk_sign = b''
         self.sk_ex = b''
@@ -121,6 +121,7 @@ class AssistingNode:
             return self.msg_recv_no_sig(msg)
         else:
             # print("sig")
+            
             operation, session_id, content, sig = self.msg_recv_with_sig(msg)
             msg = {'type': operation, 'session_id': session_id, 'content': content}
             pk_d = self.user_info[session_id]['PK_SIGN']

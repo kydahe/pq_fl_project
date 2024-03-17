@@ -58,8 +58,8 @@ class UserClient:
         self.server_info = {}
         self.asnode_info = {}
         self.N_SIGN = 50
-        self.NODE_NUM = 10
-        self.VEC_LEN = 16000 #  26010
+        self.NODE_NUM = 3
+        self.VEC_LEN = 16000  # 26010
         self.sk_sign = b''
         self.pk_sign = b''
         self.sk_ex = b''
@@ -244,7 +244,6 @@ class UserClient:
 
 
     def setup_phase(self, context, asnodes, node_aggs, server, server_agg, server_broad):
-        
         # Connecting to Server
         # print("Connecting to Server ...")
         socket = context.socket(zmq.REQ)
@@ -332,7 +331,7 @@ class UserClient:
                     self.asnode_info[remote_id]['MASKINGS'][t] = x_a_prf
         
         end_time = time.time()
-        print("{} masking_precomputing time = {}".format(self.user_id, end_time - start_time))
+        print("{} masking_precomputing time = {}".format(self.user_id, (end_time - start_time)*1000))
 
 
         
@@ -373,8 +372,8 @@ class UserClient:
         msg_server = self.msg_send('USER_MASK_UPDATE', msg_server)
         
         end_time = time.time()
-        print("{} masking_updates message signing: {}".format(self.user_id, end_time - start_time_1))
-        print("{} masking_updates message construction: {}".format(self.user_id, end_time - start_time))
+        print("{} masking_updates message signing: {}".format(self.user_id, (end_time - start_time_1)))
+        print("{} masking_updates message construction: {}".format(self.user_id, (end_time - start_time)*1000))
         
         
         time_arr = []
@@ -462,7 +461,7 @@ class UserClient:
         
         Dilithium2.precomputing(self.sk_sign, self.N_SIGN*100)
 
-    def run_client(self, host, asnode_ports, server_ports):
+    def run_client(self, host, asnode_ports, server_ports, flat_gradients):
         print("run client {}".format(self.user_id))
         
         
@@ -489,17 +488,17 @@ class UserClient:
         self.masking_precomputing()
         
         
-        print("====================== Local Training ======================")
+        # print("====================== Local Training ======================")
         # model, optimizer, train_loader, test_loader, device = self.get_model()
-        start_time = time.time()
+        # start_time = time.time()
         # model, train_loader, optimizer = self.local_training(model, train_loader, optimizer, device)
         
         # client_update_vector = get_gradients(model)
         # flat_gradients, mid_gradients = gradients_to_np_array(client_update_vector)
         # original_shapes = get_shape(model, mid_gradients)
         
-        flat_gradients = self.generate_vector()
-        print("{} Training gradient generation: {}".format(self.user_id, time.time() - start_time))
+        # flat_gradients = self.generate_vector()
+        # print("{} Training gradient generation: {}".format(self.user_id, time.time() - start_time))
         
         
         """
@@ -523,7 +522,23 @@ class UserClient:
 """
 Do not using Python Multithreading
 """
+
+def run_one_user(node, w):
+    asnode_ports = [[5600, 5601, 5602], [5610, 5611, 5612],
+                    [5620, 5621, 5622], [5630, 5631, 5632],
+                    [5640, 5641, 5642], [5650, 5651, 5652],
+                    [5660, 5661, 5662], [5670, 5671, 5672],
+                    [5680, 5681, 5682], [5690, 5691, 5692]]
+
+
+    server_ports = [5500, 5501, 5502]
+    # server = "tcp://localhost:5500"
+    host = "tcp://localhost"
+    node.run_client(host, asnode_ports, server_ports, w)
+
+
 user_id = sys.argv[1]
+
 asnode_ports = [[5600, 5601, 5602], [5610, 5611, 5612],
                 [5620, 5621, 5622], [5630, 5631, 5632],
                 [5640, 5641, 5642], [5650, 5651, 5652],
@@ -537,8 +552,6 @@ host = "tcp://localhost"
 
 node = UserClient(user_id)
 node.preparing()
-
-# w = node.generate_vector()
-node.run_client(host, asnode_ports, server_ports)
-
+w = node.generate_vector()
+node.run_client(host, asnode_ports, server_ports, w)
 

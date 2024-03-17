@@ -39,9 +39,9 @@ class Server:
         self.asnode_info = {}
         self.user_info = {}
         self.N_SIGN = 50
-        self.USER_NUM = 10
-        self.ASNODE_NUM = 10
-        self.VEC_LEN = 16000
+        self.USER_NUM = 200
+        self.ASNODE_NUM = 3
+        self.VEC_LEN = 16000  # 26010
         self.sk_sign = b''
         self.pk_sign = b''
         self.server_id = server_id
@@ -56,6 +56,7 @@ class Server:
         self.KE_DONE = False
         self.iter_num = 0
         self.messages = []
+        self.receive_count = 10
 
     def msg_send_with_sig(self, socket, operation, content, sig):
         msg = {'type': operation, 'session_id': self.server_id, 'content': content, 'sig': sig}
@@ -98,6 +99,7 @@ class Server:
             return self.msg_recv_no_sig(msg)
         else:
             # print("sig")
+            start_time = time.time()
             operation, session_id, content, sig = self.msg_recv_with_sig(msg)
             msg = {'type': operation, 'session_id': session_id, 'content': content}
             if session_id in self.asnode_info:
@@ -106,6 +108,9 @@ class Server:
                 pk_d = self.user_info[session_id]['PK_SIGN']
             sig_bytes = base64.b64decode(sig)
             ver = dili_verify(str(msg).encode('utf-8'), sig_bytes, pk_d)
+            if self.receive_count > 0:
+                print("msg_recv time = {}".format(time.time() - start_time))
+                self.receive_count = self.receive_count - 1
             return operation, session_id, content
 
     def setup_phase(self, socket):
