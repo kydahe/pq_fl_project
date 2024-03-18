@@ -44,12 +44,12 @@ from Cryptodome.Hash import SHA256
 from Cryptodome.Signature import DSS
 
 init_uid = 1
-init_nid = 101
+init_nid = 5001
 
 node_info = {}
-N_SIGN = 50
+N_SIGN = 40
 NODE_NUM = 3
-USER_NUM = 10
+USER_NUM = int(sys.argv[1])
 VEC_LEN = 16000  # 26010
 sk_sign = b''
 pk_sign = b''
@@ -61,15 +61,17 @@ KE_DONE = False
 iter_num = 0
 user_ids = [str(init_uid + i) for i in range(USER_NUM)]
 asnode_ids = [str(init_nid + i) for i in range(NODE_NUM)]
-server_id = 1000
+server_id = 10000
 
 
 def generate_vector():
+    w_arr = [bytes_to_int(gen_r()[:4]) for _ in range(VEC_LEN)]
+    w = np.array(w_arr)
     for user_id in user_ids:
-        w_arr = [bytes_to_int(gen_r()[:4]) for _ in range(VEC_LEN)]
-        w = np.array(w_arr)
-        node_info[user_id]['VECTOR'][iter_num] = w
-    return w
+        # w_arr = [bytes_to_int(gen_r()[:4]) for _ in range(VEC_LEN)]
+        # w = np.array(w_arr)
+        # print("{} generate_vector".format(user_id))
+        node_info[user_id]['VECTOR'][str(iter_num)] = w
 
 def gen_at(x_a, t, length=16):
     # start_time = time.time()
@@ -118,17 +120,19 @@ def msg_recv_no_sig(resp):
     content = resp.get('content')
     return operation, session_id, content
 
-def msg_send(operation, local_id, content, signed=False):
+def msg_send(operation, local_id, content, base=10, signed=False):
+    global sign_count
     if KE_DONE == False and signed == False:
         msg_to_sent = msg_send_no_sig(operation, local_id, content)
     else:
-        # print("sig")
+        # print("sig {}: {}".format(local_id, sign_count))
         sk_sign = node_info[local_id]['SK_SIGN']
         msg = {'type': operation, 'session_id': local_id, 'content': content}
         sig = dili_sign(str(msg).encode('utf-8'), sk_sign, sign_count)
         sig_str = base64.b64encode(sig).decode('utf-8')
+        # print(sig_str)
         msg_to_sent = msg_send_with_sig(operation, local_id, content, sig_str)
-        sign_count = (sign_count + 1) % 50
+        sign_count = (sign_count + 1) % base
     return msg_to_sent
 
 def msg_recv(msg):
@@ -138,6 +142,8 @@ def msg_recv(msg):
     else:
         operation, session_id, content, sig = msg_recv_with_sig(msg)
         msg = {'type': operation, 'session_id': session_id, 'content': content}
+        # print("sig {}".format(session_id))
+        # print(sig)
         pk_d = node_info[session_id]['PK_SIGN']
         sig_bytes = base64.b64decode(sig)
         ver = dili_verify(str(msg).encode('utf-8'), sig_bytes, pk_d)
@@ -173,15 +179,31 @@ def setup_phase():
             # if 'MESSAGING' not in node_info[user_id]:
             #     node_info[user_id]['MESSAGING'] = {}
     
-    for node_id in node_info:
+    pk_sign, sk_sign = gen_pk("Dili")
+    pk_ex, sk_ex = gen_pk("Kyber")
+    Dilithium2.precomputing(sk_sign, N_SIGN*15)
+    node_info[server_id]['SK_SIGN'] = sk_sign
+    node_info[server_id]['PK_SIGN'] = pk_sign
+    print("{} generate key".format(server_id))
+    
+    for node_id in user_ids:
         pk_sign, sk_sign = gen_pk("Dili")
         pk_ex, sk_ex = gen_pk("Kyber")
-        Dilithium2.precomputing(sk_sign, N_SIGN*100)
+        Dilithium2.precomputing(sk_sign, N_SIGN*15)
         node_info[node_id]['SK_SIGN'] = sk_sign
-        node_info[node_id]['PK_SIGN'] = sk_sign
+        node_info[node_id]['PK_SIGN'] = pk_sign
         if node_id in user_ids:
             node_info[node_id]['PK_EX'] = pk_ex
             node_info[node_id]['SK_EX'] = sk_ex
+        print("{} generate key".format(node_id))
+    
+    for node_id in asnode_ids:
+        pk_sign, sk_sign = gen_pk("Dili")
+        pk_ex, sk_ex = gen_pk("Kyber")
+        Dilithium2.precomputing(sk_sign, N_SIGN*15)
+        node_info[node_id]['SK_SIGN'] = sk_sign
+        node_info[node_id]['PK_SIGN'] = pk_sign
+        print("{} generate key".format(node_id))
     
     for user_id in user_ids:
         c, k = kyber_encaps(node_info[user_id]['PK_EX'])
@@ -192,34 +214,18 @@ def setup_phase():
             #     node_info[node_id]['SHARED_SECRET'] = {}
             node_info[node_id]['SHARED_SECRET'][user_id] = k
             node_info[user_id]['SHARED_SECRET'][node_id] = k
-    
-    KE_DONE = True
+        
+        # print("{} generate shared secret".format(user_id))
+
 
 
 # masking_precomputing for one client
-def masking_precomputing_oc():
-    user_time = []
-    for user_id in user_ids:
-        start_time = time.time()
-        for node_id in asnode_ids:
-            x_a = node_info[user_id]['SHARED_SECRET'][node_id]
-            # if 'MASKINGS' not in node_info[node_id]:
-            #     node_info[node_id]['MASKINGS'] = {}
-            #     node_info[node_id]['MASKINGS'][user_id] = {}
-            x_a_prf = gen_at(x_a, iter_num, VEC_LEN)
-            node_info[node_id]['MASKINGS'][user_id][str(iter_num)] = x_a_prf
-            # if 'MASKINGS' not in node_info[user_id]:
-            #     node_info[user_id]['MASKINGS'] = {}
-            #     node_info[user_id]['MASKINGS'][node_id] = {}
-            node_info[user_id]['MASKINGS'][node_id][str(iter_num)] = x_a_prf
-        end_time = time.time()
-        user_time.append((end_time - start_time)*1000)
-    
-    
-    
-    # print("One user masking_precomputing time = {}".format(np.mean(np.array(user_time))))
-    # print("All users masking_precomputing time = {}".format(np.sum(np.array(user_time))))
-
+def masking_precomputing_oc(user_id):
+    for node_id in asnode_ids:
+        x_a = node_info[user_id]['SHARED_SECRET'][node_id]
+        x_a_prf = gen_at(x_a, iter_num, VEC_LEN)
+        node_info[node_id]['MASKINGS'][user_id][str(iter_num)] = x_a_prf
+        node_info[user_id]['MASKINGS'][node_id][str(iter_num)] = x_a_prf
 
         
 def client_masking_updates(user_id, precomputing):
@@ -235,7 +241,7 @@ def client_masking_updates(user_id, precomputing):
             x_a_prf = gen_at(x_a, iter_num, len(w))
             a_t = a_t + x_a_prf
     
-    w = node_info[user_id]['VECTOR'][iter_num]
+    w = node_info[user_id]['VECTOR'][str(iter_num)]
     a_t = a_t.astype(int)
     y_t = w + a_t
     
@@ -271,8 +277,9 @@ def client_aggregation_updates(user_id):
     operation, remote_id, content = msg_recv(msg)
     content_list = ast.literal_eval(content)
     update_vec = np.array(content_list)
+    # print(update_vec)
     
-    iter_num = iter_num + 1
+    
 
 # def client_aggregation_phase(user_id, precomputing=False):
 #     masking_updates(user_id, precomputing)
@@ -321,7 +328,9 @@ def server_aggregation_updates(user_updates, node_updates):
     
     msg_vec = np.array2string(w, separator=', ', threshold=np.inf)
     msg = msg_send('SERVER_AGGR_BROAD', server_id, msg_vec)
-    node_info[user_id]['MESSAGING'][server_id] = msg
+    # print(w)
+    for user_id in user_ids:
+        node_info[user_id]['MESSAGING'][server_id] = msg
     
 def aggregation_phase():
     user_updates, node_updates = server_masking_updates()
@@ -368,39 +377,86 @@ def node_aggregation_phase(node_id, precomputing=False):
     aggregation_updates(node_id, user_count, precomputing)
 
 
-
+print("User number = {}, Assisting Node number = {}".format(USER_NUM, NODE_NUM))
 print("====================== Setup Phase ======================")
+start_time = time.time()
 setup_phase()
+KE_DONE = True
+end_time = time.time()
+print("Total setup_phase time = {}".format((end_time - start_time)*1000))
 
 print("++++++++++++ generate_vector ++++++++++++")
+start_time = time.time()
 generate_vector()
+end_time = time.time()
+print("Total generate_vector time = {}".format((end_time - start_time)*1000))
 
 
-print("++++++++++++ masking_precomputing_oc ++++++++++++")
-masking_precomputing_oc()
+print("++++++++++++ masking_precomputing ++++++++++++")
+used_time = []
+for user_id in user_ids:
+    start_time = time.time()
+    masking_precomputing_oc(user_id)
+    end_time = time.time()
+    used_time.append((end_time - start_time)*1000)
+
+client_pre = np.mean(np.array(used_time))
+print("One user masking_precomputing time = {}".format(np.mean(np.array(used_time))))
+
 
 print("====================== Aggregation Phase ======================")
 print("++++++++++++ client_masking_updates ++++++++++++")
+used_time = []
 for user_id in user_ids:
+    start_time = time.time()
     client_masking_updates(user_id, precomputing=True)
+    end_time = time.time()
+    used_time.append((end_time - start_time)*1000)
+
+client_mu = np.mean(np.array(used_time))
+print("One user client_masking_updates time = {}".format(np.mean(np.array(used_time))))
 
 print("++++++++++++ node_aggregation ++++++++++++")
+used_time = []
+used_time1 = []
 for node_id in asnode_ids:
+    start_time = time.time()
     user_count = node_masking_updates(node_id)
+    used_time1.append((time.time() - start_time)*1000)
     node_aggregation_updates(node_id, user_count, precomputing=True)
+    end_time = time.time()
+    used_time.append((end_time - start_time)*1000)
 
+node_agg = np.mean(np.array(used_time))
+print("One assisting node node_masking_updates time = {}".format(np.mean(np.array(used_time1))))
+print("One assisting node node_aggregation time = {}".format(np.mean(np.array(used_time))))
 
-print("++++++++++++ server_masking_updates ++++++++++++")
+print("++++++++++++ server_aggregation ++++++++++++")
+# print("++++++++++++ server_masking_updates ++++++++++++")
+# start_time = time.time()
 user_updates, node_updates = server_masking_updates()
 
 
-print("++++++++++++ server_aggregation_updates ++++++++++++")
+# print("++++++++++++ server_aggregation_updates ++++++++++++")
+start_time = time.time()
 server_aggregation_updates(user_updates, node_updates)
-
+end_time = time.time()
+server_agg = (end_time - start_time)*1000
+print("Server server_aggregation time = {}".format((end_time - start_time)*1000))
 
 print("++++++++++++ client_aggregation_updates ++++++++++++")
+used_time = []
 for user_id in user_ids:
+    start_time = time.time()
     client_aggregation_updates(user_id)
+    end_time = time.time()
+    used_time.append((end_time - start_time)*1000)
 
+client_agg = np.mean(np.array(used_time))
+print("One client client_aggregation_updates time = {}".format(np.mean(np.array(used_time))))
+
+iter_num = iter_num + 1
 
 print("====================== Done ======================")
+print("Total Time without precomputation: {}".format(client_mu + node_agg + server_agg + client_agg))
+print("+ precomputation: {}".format(client_pre + client_mu + node_agg + server_agg + client_agg))

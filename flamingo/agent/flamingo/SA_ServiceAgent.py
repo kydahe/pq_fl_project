@@ -499,8 +499,8 @@ class SA_ServiceAgent(Agent):
     def reconstruction_read_from_pool(self):
         # if not enough shares received, wait for 0.1 sec
         if len(self.recv_committee_shares_pairwise) < self.committee_threshold:
-            # time.sleep(0.1)
-            time.sleep(1)
+            time.sleep(0.1)
+            # time.sleep(1)
 
         # TEST
         # _, json_string = self.serialize_dim2_ecp(self.recv_committee_shares_pairwise)

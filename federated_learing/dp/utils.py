@@ -62,11 +62,16 @@ def gen_pk(opt="Dili"):
 
 def gen_r():
     random_number = random.randint(0, 4294967295)
-    # seed_msg = bytes("Message is {}".format(random_number).encode('UTF-8'))
-    seed_msg = bytes("{}".format(random_number).encode('UTF-8'))
+    seed_msg = bytes("Message is {}".format(random_number).encode('UTF-8'))
+    
+    # seed_msg = bytes("{}".format(random_number).encode('UTF-8'))
+    # cipher = AES.new(b"seed_msg", AES.MODE_CTR, use_aesni='True')
+    # r = cipher.encrypt(seed_msg)
+    
     variant="Ascon-Hash"
     hashlength = 32
     r = ascon_hash(seed_msg, variant, hashlength)
+    
     # print(random_number)
     # print(r.hex())
     return r

@@ -8,9 +8,9 @@ import math
 vector_len = 16000
 vector_type = 'uint32'
 # committee_size = 60
-committee_size = 64
+committee_size = 80
 # fraction = 1/3
-fraction = 1
+fraction = 0.8
 user_fraction = 1
 fixed_key = b"abcd"
 
